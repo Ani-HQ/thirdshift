@@ -59,6 +59,7 @@ func run() error {
 			StaleAfter:  cfg.SessionStaleAfter,
 			LeaseTTL:    10 * time.Second,
 			SyncTimeout: 120 * time.Second,
+			CreditHold:  cfg.CreditHold,
 			Logger:      logger,
 		}
 		validator, err := protocolValidator()

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.5 - 2026-07-29
+
+- Added coordinator metering plausibility checks, verification events, duplicate verification sampling, challenge reputation/quarantine updates, and verification-overhead accounting.
+- Added balanced accepted-job ledger posting, pending-to-available host credit release, immutable payout batch create/export/confirm, and economics reporting.
+- Added migration `000006`, M5 unit/integration coverage, operator payout runbook steps, and Windows verification script checks.
+
 ## 0.1.0-alpha.4 - 2026-07-29
 
 - Added local host schedule configuration, schedule-aware heartbeats, and scheduler exclusion for out-of-window nodes.

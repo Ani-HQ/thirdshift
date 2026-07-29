@@ -22,6 +22,7 @@ type Manifest struct {
 	Capabilities  Capabilities
 	Policy        Policy
 	Pricing       Pricing
+	Verification  Verification
 }
 
 type Source struct {
@@ -87,6 +88,11 @@ type Pricing struct {
 	CustomerInputPerMillionUSD            float64
 	CustomerOutputPerMillionUSD           float64
 	HostCreditPerMillionAcceptedOutputUSD float64
+}
+
+type Verification struct {
+	DuplicateSampleRate float64
+	ChallengeRate       float64
 }
 
 func LoadCatalogManifest(catalogDir, modelID string) (Manifest, string, error) {
@@ -300,6 +306,17 @@ func assignSection(manifest *Manifest, section, key, value string) error {
 			manifest.Pricing.CustomerOutputPerMillionUSD = parsed
 		case "host_credit_per_million_accepted_output_usd":
 			manifest.Pricing.HostCreditPerMillionAcceptedOutputUSD = parsed
+		}
+	case "verification":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return fmt.Errorf("verification %s must be a number: %w", key, err)
+		}
+		switch key {
+		case "duplicate_sample_rate":
+			manifest.Verification.DuplicateSampleRate = parsed
+		case "challenge_rate":
+			manifest.Verification.ChallengeRate = parsed
 		}
 	}
 	return nil

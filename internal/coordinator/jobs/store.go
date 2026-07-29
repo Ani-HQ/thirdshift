@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anianroid/thirdshift/internal/coordinator/ledger"
 	"github.com/anianroid/thirdshift/internal/node/models"
 	"github.com/anianroid/thirdshift/internal/shared/ids"
 	"github.com/anianroid/thirdshift/internal/shared/protocol"
@@ -308,16 +309,19 @@ SET customer_input_per_million_microdollars = EXCLUDED.customer_input_per_millio
 		maxRequestBytes = 256 * 1024
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO model_manifest_limits (model_id, max_input_tokens, max_output_tokens, max_request_bytes, capabilities, content_filter_profile, updated_at)
-VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
+INSERT INTO model_manifest_limits (model_id, max_input_tokens, max_output_tokens, max_request_bytes, capabilities, content_filter_profile, price_version, duplicate_sample_rate, challenge_rate, updated_at)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'alpha', $7, $8, now())
 ON CONFLICT (model_id) DO UPDATE
 SET max_input_tokens = EXCLUDED.max_input_tokens,
     max_output_tokens = EXCLUDED.max_output_tokens,
     max_request_bytes = EXCLUDED.max_request_bytes,
     capabilities = EXCLUDED.capabilities,
     content_filter_profile = EXCLUDED.content_filter_profile,
+    price_version = EXCLUDED.price_version,
+    duplicate_sample_rate = EXCLUDED.duplicate_sample_rate,
+    challenge_rate = EXCLUDED.challenge_rate,
     updated_at = now()
-`, manifest.ModelID, maxInputTokens, maxOutputTokens, maxRequestBytes, string(capabilitiesBody), manifest.Policy.ContentFilterProfile); err != nil {
+`, manifest.ModelID, maxInputTokens, maxOutputTokens, maxRequestBytes, string(capabilitiesBody), manifest.Policy.ContentFilterProfile, clampRate(manifest.Verification.DuplicateSampleRate), clampRate(manifest.Verification.ChallengeRate)); err != nil {
 		return fmt.Errorf("upsert model manifest limits: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -335,7 +339,10 @@ SELECT m.id, m.display_name, m.data_class, mv.version,
        COALESCE(hp.max_context_tokens, 4096),
        COALESCE(ml.max_output_tokens, 1024),
        COALESCE(ml.max_request_bytes, 262144),
-       COALESCE(ml.capabilities, '{}'::jsonb)
+       COALESCE(ml.capabilities, '{}'::jsonb),
+       COALESCE(ml.price_version, 'alpha'),
+       COALESCE(ml.duplicate_sample_rate::float8, 0),
+       COALESCE(ml.challenge_rate::float8, 0)
 FROM models m
 JOIN LATERAL (
   SELECT * FROM model_versions WHERE model_id = m.id ORDER BY created_at DESC LIMIT 1
@@ -358,7 +365,7 @@ ORDER BY m.id
 	for rows.Next() {
 		var model ModelInfo
 		var capabilitiesRaw []byte
-		if err := rows.Scan(&model.ID, &model.DisplayName, &model.DataClass, &model.Version, &model.Pricing.CustomerInputPerMillionMicrodollars, &model.Pricing.CustomerOutputPerMillionMicrodollars, &model.Pricing.HostCreditPerMillionAcceptedOutputMicrodollars, &model.Limits.MaxInputTokens, &model.Limits.MaxOutputTokens, &model.Limits.MaxRequestBytes, &capabilitiesRaw); err != nil {
+		if err := rows.Scan(&model.ID, &model.DisplayName, &model.DataClass, &model.Version, &model.Pricing.CustomerInputPerMillionMicrodollars, &model.Pricing.CustomerOutputPerMillionMicrodollars, &model.Pricing.HostCreditPerMillionAcceptedOutputMicrodollars, &model.Limits.MaxInputTokens, &model.Limits.MaxOutputTokens, &model.Limits.MaxRequestBytes, &capabilitiesRaw, &model.Verification.PriceVersion, &model.Verification.DuplicateSampleRate, &model.Verification.ChallengeRate); err != nil {
 			return nil, fmt.Errorf("scan model: %w", err)
 		}
 		model.Capabilities = capabilitiesFromJSON(capabilitiesRaw)
@@ -455,11 +462,9 @@ WHERE n.state = 'AVAILABLE'
 }
 
 func (s PGStore) EligibleNodes(ctx context.Context, modelID string, freshnessCutoff time.Time) ([]Candidate, error) {
-	// TODO(M5): add data-class and richer reputation
-	// filters once those inputs are persisted.
 	rows, err := s.Pool.Query(ctx, `
 SELECT n.id, ns.id, hb.model_hash, hb.runtime_hash,
-       COALESCE(rep.rolling_success_rate::float8, 1.0)
+       COALESCE(rep.rolling_success_rate::float8, 0.6)
 FROM nodes n
 JOIN LATERAL (
   SELECT id, COALESCE(last_heartbeat_at, connected_at) AS freshness
@@ -591,7 +596,7 @@ WHERE id = $1
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("job attempt was not accepted within the offer window")
 	}
-	if _, err := tx.Exec(ctx, "UPDATE jobs SET state = 'running', updated_at = $2 WHERE id = $1", jobID, acceptedAt); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE jobs SET state = 'running', updated_at = $2 WHERE id = $1 AND state <> 'succeeded'", jobID, acceptedAt); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -614,16 +619,22 @@ WHERE id = $1 AND job_id = $2 AND status IN ('accepted', 'running')
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("job attempt cannot be marked running from its current state")
 	}
-	if _, err := tx.Exec(ctx, "UPDATE jobs SET state = 'running', updated_at = $2 WHERE id = $1", jobID, startedAt); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE jobs SET state = 'running', updated_at = $2 WHERE id = $1 AND state <> 'succeeded'", jobID, startedAt); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-func (s PGStore) CompleteJob(ctx context.Context, payload protocol.JobCompletedPayload) (OpenAIResponse, error) {
+func (s PGStore) CompleteJob(ctx context.Context, payload protocol.JobCompletedPayload, receivedAt time.Time, creditHold time.Duration, meteringStatus string) (OpenAIResponse, error) {
 	resultID, err := ids.New("res")
 	if err != nil {
 		return OpenAIResponse{}, err
+	}
+	if receivedAt.IsZero() {
+		receivedAt = time.Now().UTC()
+	}
+	if meteringStatus == "" {
+		meteringStatus = "accepted"
 	}
 	dataClass := "public_or_non_sensitive"
 	_ = s.Pool.QueryRow(ctx, "SELECT data_class FROM models WHERE id = $1", payload.ModelID).Scan(&dataClass)
@@ -659,17 +670,75 @@ func (s PGStore) CompleteJob(ctx context.Context, payload protocol.JobCompletedP
 		return OpenAIResponse{}, fmt.Errorf("begin complete job: %w", err)
 	}
 	defer tx.Rollback(context.Background())
+	var status string
+	var acceptedAt sql.NullTime
+	var leaseExpiresAt time.Time
+	var deadlineAt time.Time
+	var completedByAnother bool
+	if err := tx.QueryRow(ctx, `
+SELECT ja.status, ja.accepted_at, ja.lease_expires_at, ja.deadline_at,
+       EXISTS (
+         SELECT 1 FROM job_attempts other
+         WHERE other.job_id = ja.job_id AND other.id <> ja.id AND other.status = 'succeeded'
+       )
+FROM job_attempts ja
+WHERE ja.id = $1 AND ja.job_id = $2
+FOR UPDATE
+`, payload.AttemptID, payload.JobID).Scan(&status, &acceptedAt, &leaseExpiresAt, &deadlineAt, &completedByAnother); err != nil {
+		return OpenAIResponse{}, fmt.Errorf("load attempt for completion: %w", err)
+	}
+	if completedByAnother || status == "succeeded" {
+		return OpenAIResponse{}, fmt.Errorf("job already has an accepted result")
+	}
+	if status != "accepted" && status != "running" {
+		return OpenAIResponse{}, fmt.Errorf("job attempt cannot complete from status %s", status)
+	}
+	if !acceptedAt.Valid {
+		return OpenAIResponse{}, fmt.Errorf("job attempt was never accepted")
+	}
+	if acceptedAt.Time.After(leaseExpiresAt) {
+		return OpenAIResponse{}, fmt.Errorf("job attempt was accepted after lease expiry")
+	}
+	if receivedAt.After(deadlineAt) {
+		return OpenAIResponse{}, fmt.Errorf("job result arrived after deadline")
+	}
+	var coordinatorDurationMillis int64
+	if err := tx.QueryRow(ctx, `
+SELECT GREATEST(0, FLOOR(EXTRACT(EPOCH FROM ($3 - COALESCE(started_at, accepted_at, created_at))) * 1000))::bigint
+FROM job_attempts
+WHERE id = $1 AND job_id = $2
+`, payload.AttemptID, payload.JobID, receivedAt).Scan(&coordinatorDurationMillis); err != nil {
+		return OpenAIResponse{}, fmt.Errorf("compute coordinator duration: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO job_results (id, job_id, attempt_id, model_hash, runtime_hash, prompt_tokens, completion_tokens, duration_millis, response_metadata, accepted, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, true, $10)
-`, resultID, payload.JobID, payload.AttemptID, payload.ModelHash, payload.RuntimeHash, payload.Usage.PromptTokens, payload.Usage.CompletionTokens, payload.DurationMillis, string(responseBody), payload.CompletedAt); err != nil {
+INSERT INTO job_results (id, job_id, attempt_id, model_hash, runtime_hash, prompt_tokens, completion_tokens, duration_millis, coordinator_duration_millis, response_metadata, accepted, metering_status, verification_status, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, true, $11, 'accepted', $12)
+`, resultID, payload.JobID, payload.AttemptID, payload.ModelHash, payload.RuntimeHash, payload.Usage.PromptTokens, payload.Usage.CompletionTokens, payload.DurationMillis, coordinatorDurationMillis, string(responseBody), meteringStatus, receivedAt); err != nil {
 		return OpenAIResponse{}, fmt.Errorf("insert job result: %w", err)
 	}
-	if _, err := tx.Exec(ctx, "UPDATE job_attempts SET status = 'succeeded', finished_at = $3 WHERE id = $1 AND job_id = $2", payload.AttemptID, payload.JobID, payload.CompletedAt); err != nil {
+	ledgerResult, err := (ledger.Store{}).PostAcceptedJobTx(ctx, tx, ledger.AcceptedJobPosting{
+		JobID:                     payload.JobID,
+		AttemptID:                 payload.AttemptID,
+		ReceivedAt:                receivedAt,
+		CreditHold:                creditHold,
+		PromptTokens:              payload.Usage.PromptTokens,
+		CompletionTokens:          payload.Usage.CompletionTokens,
+		CoordinatorDurationMillis: coordinatorDurationMillis,
+	})
+	if err != nil {
+		return OpenAIResponse{}, fmt.Errorf("post accepted job ledger: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "UPDATE job_results SET price_version = $2 WHERE id = $1", resultID, ledgerResult.PriceVersion); err != nil {
+		return OpenAIResponse{}, fmt.Errorf("update result price version: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "UPDATE job_attempts SET status = 'succeeded', finished_at = $3 WHERE id = $1 AND job_id = $2", payload.AttemptID, payload.JobID, receivedAt); err != nil {
 		return OpenAIResponse{}, fmt.Errorf("mark job succeeded: %w", err)
 	}
-	if _, err := tx.Exec(ctx, "UPDATE jobs SET state = 'succeeded', updated_at = $2, completed_at = $2 WHERE id = $1", payload.JobID, payload.CompletedAt); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE jobs SET state = 'succeeded', updated_at = $2, completed_at = $2 WHERE id = $1", payload.JobID, receivedAt); err != nil {
 		return OpenAIResponse{}, fmt.Errorf("mark job completed: %w", err)
+	}
+	if err := s.updateAcceptedReputationTx(ctx, tx, payload.AttemptID, receivedAt); err != nil {
+		return OpenAIResponse{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return OpenAIResponse{}, fmt.Errorf("commit complete job: %w", err)
@@ -689,6 +758,9 @@ SET status = 'failed', transient_failure = $4, error_code = $5, finished_at = $3
 WHERE id = $1 AND job_id = $2 AND status IN ('offered', 'accepted', 'running')
 `, attemptID, jobID, now, transient, code); err != nil {
 		return fmt.Errorf("mark attempt failed: %w", err)
+	}
+	if err := s.updateFailureReputationTx(ctx, tx, attemptID, code, now); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(ctx, `
 UPDATE jobs
@@ -717,6 +789,9 @@ WHERE id = $1 AND job_id = $2
 `, attemptID, jobID, now, transient, code); err != nil {
 			return fmt.Errorf("mark attempt failed: %w", err)
 		}
+		if err := s.updateFailureReputationTx(ctx, tx, attemptID, code, now); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(ctx, `
 UPDATE jobs
@@ -727,6 +802,89 @@ WHERE id = $1
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit fail job: %w", err)
+	}
+	return nil
+}
+
+func (s PGStore) CreateVerificationAttempt(ctx context.Context, jobID, nodeID string, leaseExpiresAt, deadlineAt time.Time) (ScheduledAttempt, error) {
+	attemptID, err := ids.New("att")
+	if err != nil {
+		return ScheduledAttempt{}, err
+	}
+	leaseNonce, err := ids.New("lease")
+	if err != nil {
+		return ScheduledAttempt{}, err
+	}
+	var attemptNumber int
+	if err := s.Pool.QueryRow(ctx, "SELECT COALESCE(max(attempt_number), 0) + 1 FROM job_attempts WHERE job_id = $1", jobID).Scan(&attemptNumber); err != nil {
+		return ScheduledAttempt{}, fmt.Errorf("next verification attempt number: %w", err)
+	}
+	if _, err := s.Pool.Exec(ctx, `
+INSERT INTO job_attempts (id, job_id, node_id, attempt_number, lease_nonce, lease_expires_at, deadline_at, status, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'offered', now())
+`, attemptID, jobID, nodeID, attemptNumber, leaseNonce, leaseExpiresAt, deadlineAt); err != nil {
+		return ScheduledAttempt{}, fmt.Errorf("insert verification attempt: %w", err)
+	}
+	return ScheduledAttempt{JobID: jobID, AttemptID: attemptID, NodeID: nodeID, LeaseExpiresAt: leaseExpiresAt, DeadlineAt: deadlineAt}, nil
+}
+
+func (s PGStore) MarkVerificationAttemptCompleted(ctx context.Context, jobID, attemptID string, now time.Time) error {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin mark verification completed: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+	_, err = tx.Exec(ctx, `
+UPDATE job_attempts
+SET status = 'verified', finished_at = $3
+WHERE id = $1 AND job_id = $2 AND status IN ('accepted', 'running')
+`, attemptID, jobID, now)
+	if err != nil {
+		return fmt.Errorf("mark verification attempt completed: %w", err)
+	}
+	if err := s.updateAcceptedReputationTx(ctx, tx, attemptID, now); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s PGStore) MarkVerificationAttemptFailed(ctx context.Context, jobID, attemptID, code string, now time.Time) error {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin mark verification failed: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+	_, err = tx.Exec(ctx, `
+UPDATE job_attempts
+SET status = 'failed', transient_failure = true, error_code = $4, finished_at = $3
+WHERE id = $1 AND job_id = $2 AND status IN ('offered', 'accepted', 'running')
+`, attemptID, jobID, now, code)
+	if err != nil {
+		return fmt.Errorf("mark verification attempt failed: %w", err)
+	}
+	if err := s.updateFailureReputationTx(ctx, tx, attemptID, code, now); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s PGStore) PostVerificationOverhead(ctx context.Context, payload protocol.JobCompletedPayload, creditHold time.Duration, receivedAt time.Time) error {
+	if s.Pool == nil {
+		return fmt.Errorf("job store is not configured")
+	}
+	if receivedAt.IsZero() {
+		receivedAt = time.Now().UTC()
+	}
+	_, err := (ledger.Store{Pool: s.Pool}).PostVerificationOverhead(ctx, ledger.VerificationOverheadPosting{
+		JobID:                     payload.JobID,
+		AttemptID:                 payload.AttemptID,
+		ReceivedAt:                receivedAt,
+		CreditHold:                creditHold,
+		CompletionTokens:          payload.Usage.CompletionTokens,
+		CoordinatorDurationMillis: payload.DurationMillis,
+	})
+	if err != nil {
+		return fmt.Errorf("post verification overhead: %w", err)
 	}
 	return nil
 }
@@ -863,6 +1021,16 @@ func usdToMicrodollars(value float64) int64 {
 	return int64(math.Round(value * 1_000_000))
 }
 
+func clampRate(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
 func manifestSHA256(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -887,4 +1055,326 @@ func capabilitiesFromJSON(raw []byte) []string {
 		return []string{"chat_completions"}
 	}
 	return capabilities
+}
+
+func (s PGStore) updateAcceptedReputationTx(ctx context.Context, tx pgx.Tx, attemptID string, now time.Time) error {
+	nodeID, err := nodeIDForAttemptTx(ctx, tx, attemptID)
+	if err != nil {
+		return err
+	}
+	return updateAttemptReputationTx(ctx, tx, nodeID, true, "", now)
+}
+
+func (s PGStore) updateFailureReputationTx(ctx context.Context, tx pgx.Tx, attemptID, code string, now time.Time) error {
+	nodeID, err := nodeIDForAttemptTx(ctx, tx, attemptID)
+	if err != nil {
+		return err
+	}
+	return updateAttemptReputationTx(ctx, tx, nodeID, false, code, now)
+}
+
+func nodeIDForAttemptTx(ctx context.Context, tx pgx.Tx, attemptID string) (string, error) {
+	var nodeID string
+	if err := tx.QueryRow(ctx, "SELECT node_id FROM job_attempts WHERE id = $1 AND node_id IS NOT NULL", attemptID).Scan(&nodeID); err != nil {
+		return "", fmt.Errorf("load attempt node for reputation: %w", err)
+	}
+	return nodeID, nil
+}
+
+func updateAttemptReputationTx(ctx context.Context, tx pgx.Tx, nodeID string, accepted bool, code string, now time.Time) error {
+	if _, err := tx.Exec(ctx, `
+INSERT INTO node_reputation (node_id, rolling_success_rate, challenge_pass_rate, session_stability, updated_at)
+VALUES ($1, 0.6000, 1.0000, 0.6000, $2)
+ON CONFLICT (node_id) DO NOTHING
+`, nodeID, now); err != nil {
+		return fmt.Errorf("ensure node reputation: %w", err)
+	}
+	var totalAccepted, attemptTotal, attemptFailed, hashMismatch int64
+	var timeoutRate float64
+	if err := tx.QueryRow(ctx, `
+SELECT total_accepted_jobs, attempt_total, attempt_failed, hash_mismatch_count, timeout_rate::float8
+FROM node_reputation
+WHERE node_id = $1
+FOR UPDATE
+`, nodeID).Scan(&totalAccepted, &attemptTotal, &attemptFailed, &hashMismatch, &timeoutRate); err != nil {
+		return fmt.Errorf("lock node reputation: %w", err)
+	}
+	previousAttempts := attemptTotal
+	attemptTotal++
+	if accepted {
+		totalAccepted++
+	} else {
+		attemptFailed++
+		if strings.Contains(code, "hash_mismatch") || strings.Contains(code, "hash mismatch") {
+			hashMismatch++
+		}
+	}
+	timeoutFailures := int64(math.Round(timeoutRate * float64(previousAttempts)))
+	if !accepted && code == CodeJobTimeout {
+		timeoutFailures++
+	}
+	rollingSuccessRate := 0.6
+	timeoutRateNext := 0.0
+	if attemptTotal > 0 {
+		rollingSuccessRate = float64(attemptTotal-attemptFailed) / float64(attemptTotal)
+		timeoutRateNext = float64(timeoutFailures) / float64(attemptTotal)
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE node_reputation
+SET total_accepted_jobs = $2,
+    attempt_total = $3,
+    attempt_failed = $4,
+    rolling_success_rate = $5,
+    timeout_rate = $6,
+    hash_mismatch_count = $7,
+    updated_at = $8
+WHERE node_id = $1
+`, nodeID, totalAccepted, attemptTotal, attemptFailed, rollingSuccessRate, timeoutRateNext, hashMismatch, now); err != nil {
+		return fmt.Errorf("update node reputation: %w", err)
+	}
+	return nil
+}
+
+func (s PGStore) RecordMeteringIssues(ctx context.Context, payload protocol.JobCompletedPayload, issues []MeteringIssue, status string, now time.Time) error {
+	if len(issues) == 0 {
+		return nil
+	}
+	if status == "flagged" {
+		status = "accepted"
+	}
+	if status == "rejected" {
+		status = "rejected"
+	}
+	if status == "" {
+		status = "accepted"
+	}
+	body, err := json.Marshal(map[string]any{
+		"issues": issues,
+		"usage":  payload.Usage,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal metering issues: %w", err)
+	}
+	return s.insertVerificationEvent(ctx, payload.JobID, payload.AttemptID, "", "metering_plausibility", status, body, now)
+}
+
+type DuplicateOutcome struct {
+	JobID             string
+	AttemptID         string
+	NodeID            string
+	OriginalAttemptID string
+	OriginalNodeID    string
+	Agreement         bool
+	Reason            string
+	OccurredAt        time.Time
+}
+
+func (s PGStore) RecordDuplicateOutcome(ctx context.Context, outcome DuplicateOutcome) error {
+	if outcome.OccurredAt.IsZero() {
+		outcome.OccurredAt = time.Now().UTC()
+	}
+	status := "accepted"
+	if !outcome.Agreement {
+		status = "rejected"
+	}
+	body, err := json.Marshal(map[string]any{
+		"agreement":           outcome.Agreement,
+		"reason":              outcome.Reason,
+		"original_attempt_id": outcome.OriginalAttemptID,
+		"original_node_id":    outcome.OriginalNodeID,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal duplicate outcome: %w", err)
+	}
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin duplicate outcome: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+	if err := insertVerificationEventTx(ctx, tx, outcome.JobID, outcome.AttemptID, outcome.NodeID, "duplicate", status, body, outcome.OccurredAt); err != nil {
+		return err
+	}
+	if err := updateDuplicateReputationTx(ctx, tx, outcome.NodeID, !outcome.Agreement, outcome.OccurredAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+type ChallengeOutcome struct {
+	JobID      string
+	AttemptID  string
+	NodeID     string
+	ModelID    string
+	Passed     bool
+	Reason     string
+	OccurredAt time.Time
+}
+
+func (s PGStore) RecordChallengeOutcome(ctx context.Context, outcome ChallengeOutcome, failureThreshold int) error {
+	if outcome.OccurredAt.IsZero() {
+		outcome.OccurredAt = time.Now().UTC()
+	}
+	if failureThreshold <= 0 {
+		failureThreshold = 3
+	}
+	status := "accepted"
+	if !outcome.Passed {
+		status = "rejected"
+	}
+	body, err := json.Marshal(map[string]any{
+		"passed":   outcome.Passed,
+		"reason":   outcome.Reason,
+		"model_id": outcome.ModelID,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal challenge outcome: %w", err)
+	}
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin challenge outcome: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+	if err := insertVerificationEventTx(ctx, tx, outcome.JobID, outcome.AttemptID, outcome.NodeID, "challenge", status, body, outcome.OccurredAt); err != nil {
+		return err
+	}
+	quarantined, err := updateChallengeReputationTx(ctx, tx, outcome.NodeID, !outcome.Passed, failureThreshold, outcome.OccurredAt)
+	if err != nil {
+		return err
+	}
+	if quarantined {
+		eventBody, err := json.Marshal(map[string]any{
+			"reason":   "challenge_failure_threshold",
+			"model_id": outcome.ModelID,
+		})
+		if err != nil {
+			return fmt.Errorf("marshal challenge quarantine event: %w", err)
+		}
+		if err := insertVerificationEventTx(ctx, tx, outcome.JobID, outcome.AttemptID, outcome.NodeID, "challenge", "quarantined", eventBody, outcome.OccurredAt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (s PGStore) insertVerificationEvent(ctx context.Context, jobID, attemptID, nodeID, eventType, status string, details []byte, now time.Time) error {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	eventID, err := ids.New("ver")
+	if err != nil {
+		return err
+	}
+	_, err = s.Pool.Exec(ctx, `
+INSERT INTO verification_events (id, job_id, attempt_id, node_id, event_type, status, details, created_at)
+VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, $6, $7::jsonb, $8)
+`, eventID, jobID, attemptID, nodeID, eventType, status, string(details), now)
+	if err != nil {
+		return fmt.Errorf("insert verification event: %w", err)
+	}
+	return nil
+}
+
+func insertVerificationEventTx(ctx context.Context, tx pgx.Tx, jobID, attemptID, nodeID, eventType, status string, details []byte, now time.Time) error {
+	eventID, err := ids.New("ver")
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+INSERT INTO verification_events (id, job_id, attempt_id, node_id, event_type, status, details, created_at)
+VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, $6, $7::jsonb, $8)
+`, eventID, jobID, attemptID, nodeID, eventType, status, string(details), now)
+	if err != nil {
+		return fmt.Errorf("insert verification event: %w", err)
+	}
+	return nil
+}
+
+func updateDuplicateReputationTx(ctx context.Context, tx pgx.Tx, nodeID string, disagreement bool, now time.Time) error {
+	if _, err := tx.Exec(ctx, `
+INSERT INTO node_reputation (node_id, rolling_success_rate, challenge_pass_rate, session_stability, updated_at)
+VALUES ($1, 0.6000, 1.0000, 0.6000, $2)
+ON CONFLICT (node_id) DO NOTHING
+`, nodeID, now); err != nil {
+		return fmt.Errorf("ensure node reputation: %w", err)
+	}
+	var total, disagreements int64
+	if err := tx.QueryRow(ctx, `
+SELECT duplicate_total, duplicate_disagreements
+FROM node_reputation
+WHERE node_id = $1
+FOR UPDATE
+`, nodeID).Scan(&total, &disagreements); err != nil {
+		return fmt.Errorf("lock duplicate reputation: %w", err)
+	}
+	total++
+	if disagreement {
+		disagreements++
+	}
+	rate := 0.0
+	if total > 0 {
+		rate = float64(disagreements) / float64(total)
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE node_reputation
+SET duplicate_total = $2,
+    duplicate_disagreements = $3,
+    duplicate_disagreement_rate = $4,
+    updated_at = $5
+WHERE node_id = $1
+`, nodeID, total, disagreements, rate, now); err != nil {
+		return fmt.Errorf("update duplicate reputation: %w", err)
+	}
+	return nil
+}
+
+func updateChallengeReputationTx(ctx context.Context, tx pgx.Tx, nodeID string, failure bool, failureThreshold int, now time.Time) (bool, error) {
+	if _, err := tx.Exec(ctx, `
+INSERT INTO node_reputation (node_id, rolling_success_rate, challenge_pass_rate, session_stability, updated_at)
+VALUES ($1, 0.6000, 1.0000, 0.6000, $2)
+ON CONFLICT (node_id) DO NOTHING
+`, nodeID, now); err != nil {
+		return false, fmt.Errorf("ensure node reputation: %w", err)
+	}
+	var total, failed int64
+	if err := tx.QueryRow(ctx, `
+SELECT challenge_total, challenge_failed
+FROM node_reputation
+WHERE node_id = $1
+FOR UPDATE
+`, nodeID).Scan(&total, &failed); err != nil {
+		return false, fmt.Errorf("lock challenge reputation: %w", err)
+	}
+	total++
+	if failure {
+		failed++
+	}
+	passRate := 1.0
+	if total > 0 {
+		passRate = float64(total-failed) / float64(total)
+	}
+	quarantine := failure && total > 1 && failed >= int64(failureThreshold)
+	var quarantinedAt any
+	var reason any
+	if quarantine {
+		quarantinedAt = now
+		reason = "challenge_failure_threshold"
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE node_reputation
+SET challenge_total = $2,
+    challenge_failed = $3,
+    challenge_pass_rate = $4,
+    quarantined_at = COALESCE($5, quarantined_at),
+    last_quarantine_reason = COALESCE($6, last_quarantine_reason),
+    updated_at = $7
+WHERE node_id = $1
+`, nodeID, total, failed, passRate, quarantinedAt, reason, now); err != nil {
+		return false, fmt.Errorf("update challenge reputation: %w", err)
+	}
+	if quarantine {
+		if _, err := tx.Exec(ctx, "UPDATE nodes SET quarantined_at = COALESCE(quarantined_at, $2), updated_at = $2 WHERE id = $1", nodeID, now); err != nil {
+			return false, fmt.Errorf("quarantine node: %w", err)
+		}
+	}
+	return quarantine, nil
 }

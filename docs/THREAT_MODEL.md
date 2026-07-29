@@ -9,6 +9,16 @@ Thirdshift v0.1 assumes community host machines are not confidential compute. On
 - Malicious host to customer: controlled through disclosure, model and runtime hashes, challenge jobs, duplicate execution, reputation, and coordinator-delayed credit.
 - Malicious node to platform: controlled through coordinator-owned job IDs, leases, metering, pricing, idempotency, rate limits, benchmark challenges, and quarantine.
 
+## Implemented Malicious-Node Controls
+
+- Nodes cannot create billable work directly; the coordinator owns job IDs, attempts, leases, deadlines, and accepted-work decisions.
+- `job.completed` payloads must be signed by the active node Ed25519 key and must match the expected model and runtime hashes.
+- Replayed result envelopes and duplicate attempts cannot create a second successful job attempt or another job-acceptance ledger transaction.
+- Node usage reports are plausibility checked before acceptance. Rejected usage creates no host credit; suspicious-but-accepted usage is recorded as a verification event.
+- Duplicate verification runs sampled jobs on another eligible node without double-charging the customer. Disagreements update reputation.
+- Challenge failures update reputation and quarantine only after repeated failures, not a single disagreement.
+- Ledger postings are balanced, posted entries are immutable, and corrections use reversal transactions.
+
 ## Trust Boundaries
 
 - Nodes establish outbound sessions; host machines never expose public inference ports.
@@ -20,5 +30,4 @@ Thirdshift v0.1 assumes community host machines are not confidential compute. On
 
 - Complete signed release verification instructions.
 - Define incident response runbooks.
-- Add security tests for runtime binding, manifest tampering, and payload redaction.
-
+- Add broader adversarial tests for runtime binding, manifest tampering, and payout-operator mistakes.

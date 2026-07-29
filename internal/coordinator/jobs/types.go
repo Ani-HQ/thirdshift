@@ -39,16 +39,17 @@ type APIKeyPrincipal struct {
 }
 
 type ModelInfo struct {
-	ID           string       `json:"id"`
-	DisplayName  string       `json:"display_name"`
-	Capabilities []string     `json:"capabilities"`
-	Pricing      ModelPricing `json:"pricing"`
-	DataClass    string       `json:"data_class"`
-	Availability Availability `json:"availability"`
-	Version      string       `json:"version"`
-	Limits       ModelLimits  `json:"limits"`
-	ModelHash    string       `json:"-"`
-	RuntimeHash  string       `json:"-"`
+	ID           string             `json:"id"`
+	DisplayName  string             `json:"display_name"`
+	Capabilities []string           `json:"capabilities"`
+	Pricing      ModelPricing       `json:"pricing"`
+	DataClass    string             `json:"data_class"`
+	Availability Availability       `json:"availability"`
+	Version      string             `json:"version"`
+	Limits       ModelLimits        `json:"limits"`
+	Verification VerificationPolicy `json:"verification"`
+	ModelHash    string             `json:"-"`
+	RuntimeHash  string             `json:"-"`
 }
 
 type ModelPricing struct {
@@ -65,6 +66,12 @@ type ModelLimits struct {
 	MaxInputTokens  int `json:"max_input_tokens"`
 	MaxOutputTokens int `json:"max_output_tokens"`
 	MaxRequestBytes int `json:"max_request_bytes"`
+}
+
+type VerificationPolicy struct {
+	PriceVersion        string  `json:"price_version"`
+	DuplicateSampleRate float64 `json:"duplicate_sample_rate"`
+	ChallengeRate       float64 `json:"challenge_rate"`
 }
 
 type ChatCompletionRequest struct {

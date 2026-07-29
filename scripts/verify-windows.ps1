@@ -163,6 +163,42 @@ if (-not [string]::IsNullOrWhiteSpace($CoordinatorUrl) -and (Test-Path $DataDir)
     }
 }
 
+$DatabaseUrl = $env:THIRDSHIFT_DATABASE_URL
+$ok = Run-Check "M5 environment" {
+    if ([string]::IsNullOrWhiteSpace($DatabaseUrl)) {
+        throw "set THIRDSHIFT_DATABASE_URL"
+    }
+}
+if (-not $ok) { $failed++ }
+
+if ($ok) {
+    $ok = Run-Check "M5 economics report" {
+        go run ./cmd/admin-cli report economics --database-url $DatabaseUrl
+    }
+    if (-not $ok) { $failed++ }
+
+    $ok = Run-Check "M5 release available host credits" {
+        go run ./cmd/admin-cli credits release --database-url $DatabaseUrl
+    }
+    if (-not $ok) { $failed++ }
+
+    $ok = Run-Check "M5 payout create/export dry run" {
+        $PayoutOutput = go run ./cmd/admin-cli payout create --database-url $DatabaseUrl
+        $PayoutOutput
+        $BatchLine = $PayoutOutput | Where-Object { $_ -like "batch_id:*" } | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($BatchLine)) {
+            throw "no payable credits available for payout batch"
+        }
+        $BatchId = ($BatchLine -split ":", 2)[1].Trim()
+        $CsvPath = Join-Path $env:TEMP "$BatchId.csv"
+        go run ./cmd/admin-cli payout export --database-url $DatabaseUrl --batch $BatchId --out $CsvPath
+        Import-Csv $CsvPath | Format-Table
+        Write-Host "Review and confirm manually with:"
+        Write-Host "go run ./cmd/admin-cli payout confirm --database-url `$env:THIRDSHIFT_DATABASE_URL --batch $BatchId --file $CsvPath"
+    }
+    if (-not $ok) { $failed++ }
+}
+
 if ($failed -gt 0) {
     Write-Host "$failed check(s) failed."
     exit 1

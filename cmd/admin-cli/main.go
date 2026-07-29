@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/anianroid/thirdshift/internal/coordinator/database"
+	"github.com/anianroid/thirdshift/internal/coordinator/ledger"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -39,6 +41,12 @@ func run(args []string) error {
 		return invite(args[1:])
 	case "nodes":
 		return nodes(args[1:])
+	case "credits":
+		return credits(args[1:])
+	case "payout":
+		return payout(args[1:])
+	case "report":
+		return report(args[1:])
 	case "--help", "-h", "help":
 		return usage()
 	default:
@@ -276,6 +284,229 @@ func nodesList(args []string) error {
 	return nil
 }
 
+func credits(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("credits command is required\n\n%s", usageText())
+	}
+	switch args[0] {
+	case "release":
+		return creditsRelease(args[1:])
+	default:
+		return fmt.Errorf("unknown credits command %q\n\n%s", args[0], usageText())
+	}
+}
+
+func creditsRelease(args []string) error {
+	fs := flag.NewFlagSet("credits release", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	databaseURL := fs.String("database-url", firstNonEmpty(os.Getenv("THIRDSHIFT_DATABASE_URL"), os.Getenv("DATABASE_URL")), "PostgreSQL connection string")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, store, err := ledgerStore(ctx, *databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	released, err := store.PromoteAvailableCredits(ctx, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "credits_released: %d\n", released)
+	return nil
+}
+
+func payout(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("payout command is required\n\n%s", usageText())
+	}
+	switch args[0] {
+	case "create":
+		return payoutCreate(args[1:])
+	case "export":
+		return payoutExport(args[1:])
+	case "confirm":
+		return payoutConfirm(args[1:])
+	case "void":
+		return payoutVoid(args[1:])
+	default:
+		return fmt.Errorf("unknown payout command %q\n\n%s", args[0], usageText())
+	}
+}
+
+func payoutCreate(args []string) error {
+	fs := flag.NewFlagSet("payout create", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	databaseURL := fs.String("database-url", firstNonEmpty(os.Getenv("THIRDSHIFT_DATABASE_URL"), os.Getenv("DATABASE_URL")), "PostgreSQL connection string")
+	orgID := fs.String("org", "", "optional organization id")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, store, err := ledgerStore(ctx, *databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	batch, err := store.CreatePayoutBatch(ctx, *orgID, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "batch_id: %s\nstatus: %s\ntotal_microdollars: %d\nitem_count: %d\n", batch.ID, batch.Status, batch.TotalMicrodollars, batch.ItemCount)
+	return nil
+}
+
+func payoutExport(args []string) error {
+	fs := flag.NewFlagSet("payout export", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	databaseURL := fs.String("database-url", firstNonEmpty(os.Getenv("THIRDSHIFT_DATABASE_URL"), os.Getenv("DATABASE_URL")), "PostgreSQL connection string")
+	batchID := fs.String("batch", "", "payout batch id")
+	outPath := fs.String("out", "", "optional output CSV path; stdout when omitted")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *batchID == "" {
+		return fmt.Errorf("--batch is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, store, err := ledgerStore(ctx, *databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	body, batch, err := store.ExportPayoutBatch(ctx, *batchID, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if *outPath != "" {
+		if err := os.WriteFile(*outPath, body, 0o600); err != nil {
+			return fmt.Errorf("write payout CSV: %w", err)
+		}
+		fmt.Fprintf(os.Stdout, "batch_id: %s\nstatus: %s\ncsv_sha256: %s\n", batch.ID, batch.Status, batch.ExportedCSVChecksum)
+		return nil
+	}
+	_, err = os.Stdout.Write(body)
+	return err
+}
+
+func payoutConfirm(args []string) error {
+	fs := flag.NewFlagSet("payout confirm", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	databaseURL := fs.String("database-url", firstNonEmpty(os.Getenv("THIRDSHIFT_DATABASE_URL"), os.Getenv("DATABASE_URL")), "PostgreSQL connection string")
+	batchID := fs.String("batch", "", "payout batch id")
+	filePath := fs.String("file", "", "paid confirmation CSV")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *batchID == "" {
+		return fmt.Errorf("--batch is required")
+	}
+	if *filePath == "" {
+		return fmt.Errorf("--file is required")
+	}
+	file, err := os.Open(*filePath)
+	if err != nil {
+		return fmt.Errorf("open confirmation CSV: %w", err)
+	}
+	defer file.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, store, err := ledgerStore(ctx, *databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	batch, err := store.ConfirmPayoutBatch(ctx, *batchID, file, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "batch_id: %s\nstatus: %s\ntransaction_id: %s\n", batch.ID, batch.Status, batch.TransactionID)
+	return nil
+}
+
+func payoutVoid(args []string) error {
+	fs := flag.NewFlagSet("payout void", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	databaseURL := fs.String("database-url", firstNonEmpty(os.Getenv("THIRDSHIFT_DATABASE_URL"), os.Getenv("DATABASE_URL")), "PostgreSQL connection string")
+	batchID := fs.String("batch", "", "payout batch id")
+	reason := fs.String("reason", "void payout batch", "void reason")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *batchID == "" {
+		return fmt.Errorf("--batch is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, store, err := ledgerStore(ctx, *databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	batch, err := store.VoidPayoutBatch(ctx, *batchID, *reason, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "batch_id: %s\nstatus: %s\n", batch.ID, batch.Status)
+	if batch.TransactionID != "" {
+		fmt.Fprintf(os.Stdout, "reversal_transaction_id: %s\n", batch.TransactionID)
+	}
+	return nil
+}
+
+func report(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("report command is required\n\n%s", usageText())
+	}
+	switch args[0] {
+	case "economics":
+		return reportEconomics(args[1:])
+	default:
+		return fmt.Errorf("unknown report command %q\n\n%s", args[0], usageText())
+	}
+}
+
+func reportEconomics(args []string) error {
+	fs := flag.NewFlagSet("report economics", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	databaseURL := fs.String("database-url", firstNonEmpty(os.Getenv("THIRDSHIFT_DATABASE_URL"), os.Getenv("DATABASE_URL")), "PostgreSQL connection string")
+	fromRaw := fs.String("from", "", "inclusive RFC3339 timestamp")
+	untilRaw := fs.String("until", "", "exclusive RFC3339 timestamp")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	from, err := parseOptionalTime(*fromRaw)
+	if err != nil {
+		return err
+	}
+	until, err := parseOptionalTime(*untilRaw)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, store, err := ledgerStore(ctx, *databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	report, err := store.EconomicsReport(ctx, from, until)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "customer_revenue_microdollars: %d\nhost_credits_microdollars: %d\nverification_overhead_microdollars: %d\nfailed_attempt_overhead_microdollars: %d\ncontribution_margin_microdollars: %d\n",
+		report.CustomerRevenueMicrodollars,
+		report.HostCreditsMicrodollars,
+		report.VerificationOverheadMicrodollars,
+		report.FailedAttemptOverheadMicrodollars,
+		report.ContributionMarginMicrodollars)
+	return nil
+}
+
 func migrate(args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -310,7 +541,7 @@ func usage() error {
 }
 
 func usageText() string {
-	return "admin-cli commands:\n  migrate [--database-url URL] [--migrations-dir migrations]\n  org create --name <name> [--coordinator URL]\n  catalog sync [--catalog-dir models/catalog] [--coordinator URL]\n  apikey create --org <org_id> [--model <model_id>] [--coordinator URL]\n  invite create --fleet <fleet_id> [--coordinator URL]\n  nodes list [--coordinator URL]\n"
+	return "admin-cli commands:\n  migrate [--database-url URL] [--migrations-dir migrations]\n  org create --name <name> [--coordinator URL]\n  catalog sync [--catalog-dir models/catalog] [--coordinator URL]\n  apikey create --org <org_id> [--model <model_id>] [--coordinator URL]\n  invite create --fleet <fleet_id> [--coordinator URL]\n  nodes list [--coordinator URL]\n  credits release [--database-url URL]\n  payout create [--org <org_id>] [--database-url URL]\n  payout export --batch <batch_id> [--out paid.csv] [--database-url URL]\n  payout confirm --batch <batch_id> --file paid.csv [--database-url URL]\n  payout void --batch <batch_id> [--reason text] [--database-url URL]\n  report economics [--from RFC3339] [--until RFC3339] [--database-url URL]\n"
 }
 
 type multiFlag []string
@@ -333,6 +564,32 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func ledgerStore(ctx context.Context, databaseURL string) (*pgxpool.Pool, ledger.Store, error) {
+	if databaseURL == "" {
+		return nil, ledger.Store{}, fmt.Errorf("database URL is required; set THIRDSHIFT_DATABASE_URL or DATABASE_URL, or pass --database-url")
+	}
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		return nil, ledger.Store{}, fmt.Errorf("connect database: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, ledger.Store{}, fmt.Errorf("ping database: %w", err)
+	}
+	return pool, ledger.Store{Pool: pool}, nil
+}
+
+func parseOptionalTime(value string) (time.Time, error) {
+	if strings.TrimSpace(value) == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse time %q as RFC3339: %w", value, err)
+	}
+	return parsed.UTC(), nil
 }
 
 func postAdminJSON(endpoint, token string, body any, target any) error {

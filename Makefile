@@ -1,7 +1,7 @@
 GO ?= go
 MIGRATIONS_DIR ?= migrations
 
-.PHONY: build test lint migrate dev test-slice test-integration build-windows doctor-json run-local coordinator org catalog-sync apikey fake-runtime chat-demo invite nodes start status configure pause resume
+.PHONY: build test lint migrate dev test-slice test-integration build-windows doctor-json run-local coordinator org catalog-sync apikey fake-runtime chat-demo invite nodes credits-release payout-create payout-export payout-confirm payout-void report-economics start status configure pause resume
 
 build:
 	$(GO) build ./...
@@ -57,6 +57,24 @@ invite:
 
 nodes:
 	$(GO) run ./cmd/admin-cli nodes list
+
+credits-release:
+	$(GO) run ./cmd/admin-cli credits release
+
+payout-create:
+	$(GO) run ./cmd/admin-cli payout create
+
+payout-export:
+	$(GO) run ./cmd/admin-cli payout export --batch "$${BATCH_ID:?set BATCH_ID}" --out "$${PAYOUT_CSV:-payout.csv}"
+
+payout-confirm:
+	$(GO) run ./cmd/admin-cli payout confirm --batch "$${BATCH_ID:?set BATCH_ID}" --file "$${PAYOUT_CSV:-payout.csv}"
+
+payout-void:
+	$(GO) run ./cmd/admin-cli payout void --batch "$${BATCH_ID:?set BATCH_ID}"
+
+report-economics:
+	$(GO) run ./cmd/admin-cli report economics
 
 start:
 	$(GO) run ./cmd/thirdshift start

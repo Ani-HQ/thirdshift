@@ -186,3 +186,57 @@ go run ./cmd/admin-cli nodes list --coordinator $env:THIRDSHIFT_COORDINATOR_URL 
 ```
 
 Expected result: normal temperatures show `thermal_state: normal`. Test-only scripted telemetry covers warm/hard-limit transitions in CI; do not induce unsafe temperatures on real hardware.
+
+## Milestone 5 Verification, Ledger, And Payout Drill
+
+Use the Milestone 3 routed local request flow to create at least one successful completion. The coordinator will record token usage, price version, a balanced posted ledger transaction, and a pending host credit hold.
+
+Inspect unit economics:
+
+```sh
+export THIRDSHIFT_DATABASE_URL='postgres://thirdshift:thirdshift_dev_password@localhost:5432/thirdshift?sslmode=disable'
+
+go run ./cmd/admin-cli report economics --database-url "$THIRDSHIFT_DATABASE_URL"
+```
+
+Release credits whose hold has elapsed:
+
+```sh
+go run ./cmd/admin-cli credits release --database-url "$THIRDSHIFT_DATABASE_URL"
+```
+
+Create and export a payout batch:
+
+```sh
+export BATCH_ID="$(
+  go run ./cmd/admin-cli payout create --database-url "$THIRDSHIFT_DATABASE_URL" |
+  awk '/^batch_id:/ {print $2}'
+)"
+
+go run ./cmd/admin-cli payout export --database-url "$THIRDSHIFT_DATABASE_URL" --batch "$BATCH_ID" --out payout.csv
+```
+
+Review `payout.csv`. It contains:
+
+```csv
+host_id,account_reference,amount_microdollars,memo
+```
+
+After an operator has paid the listed hosts externally, confirm the batch:
+
+```sh
+go run ./cmd/admin-cli payout confirm --database-url "$THIRDSHIFT_DATABASE_URL" --batch "$BATCH_ID" --file payout.csv
+go run ./cmd/admin-cli report economics --database-url "$THIRDSHIFT_DATABASE_URL"
+```
+
+Expected result: the batch moves `draft -> exported -> paid`, associated host credit holds move to `paid`, and the payout ledger transaction balances to zero. Exported payout item contents are immutable; corrections must be handled by void/reversal workflow rather than editing posted ledger rows.
+
+To void an unpaid batch and release reserved credits back to available:
+
+```sh
+go run ./cmd/admin-cli payout void --database-url "$THIRDSHIFT_DATABASE_URL" --batch "$BATCH_ID" --reason "operator correction"
+```
+
+Voiding a paid batch posts a reversal transaction for the payout ledger transaction.
+
+Challenge and duplicate verification are coordinator policy paths. Integration tests cover duplicate sampling on a second node and challenge quarantine after repeated failures. A single challenge disagreement records reputation impact but does not quarantine the node.

@@ -3,7 +3,9 @@ package jobs
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,6 +26,7 @@ type Service struct {
 	StaleAfter   time.Duration
 	LeaseTTL     time.Duration
 	SyncTimeout  time.Duration
+	CreditHold   time.Duration
 	Now          func() time.Time
 	Logger       *slog.Logger
 	mu           sync.Mutex
@@ -31,6 +34,7 @@ type Service struct {
 	activeByNode map[string]activeJob
 	pending      map[string]chan Result
 	runs         map[string]*runState
+	duplicates   map[string]*duplicateRun
 }
 
 type sessionRef struct {
@@ -50,6 +54,17 @@ type runState struct {
 	deadlineAt time.Time
 	excluded   map[string]bool
 	attempts   int
+}
+
+type duplicateRun struct {
+	jobID             string
+	attemptID         string
+	originalAttemptID string
+	originalNodeID    string
+	expectedContent   string
+	model             ModelInfo
+	request           protocol.ChatRequest
+	deadlineAt        time.Time
 }
 
 type Result struct {
@@ -258,6 +273,27 @@ func (s *Service) HandleNodeMessage(ctx context.Context, nodeID, sessionID strin
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			return err
 		}
+		if s.isDuplicateAttempt(payload.AttemptID) {
+			s.clearActive(nodeID)
+			dup := s.removeDuplicateRun(payload.AttemptID)
+			var originalAttemptID, originalNodeID string
+			if dup != nil {
+				originalAttemptID = dup.originalAttemptID
+				originalNodeID = dup.originalNodeID
+			}
+			_ = s.Store.MarkVerificationAttemptFailed(ctx, payload.JobID, payload.AttemptID, payload.ReasonCode, payload.RejectedAt)
+			_ = s.Store.RecordDuplicateOutcome(ctx, DuplicateOutcome{
+				JobID:             payload.JobID,
+				AttemptID:         payload.AttemptID,
+				NodeID:            nodeID,
+				OriginalAttemptID: originalAttemptID,
+				OriginalNodeID:    originalNodeID,
+				Agreement:         false,
+				Reason:            payload.ReasonCode,
+				OccurredAt:        payload.RejectedAt,
+			})
+			return nil
+		}
 		apiErr := APIError{Code: CodeNoCapacity, Message: payload.Message, Retryable: payload.Retryable, Status: 503}
 		return s.handleAttemptFailure(ctx, nodeID, payload.JobID, payload.AttemptID, apiErr, payload.Retryable, payload.RejectedAt, payload.ReasonCode)
 	case protocol.TypeJobFailed:
@@ -265,12 +301,31 @@ func (s *Service) HandleNodeMessage(ctx context.Context, nodeID, sessionID strin
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			return err
 		}
+		if s.isDuplicateAttempt(payload.AttemptID) {
+			s.clearActive(nodeID)
+			dup := s.removeDuplicateRun(payload.AttemptID)
+			_ = s.Store.MarkVerificationAttemptFailed(ctx, payload.JobID, payload.AttemptID, payload.ErrorCode, payload.FailedAt)
+			_ = s.Store.RecordDuplicateOutcome(ctx, DuplicateOutcome{
+				JobID:             payload.JobID,
+				AttemptID:         payload.AttemptID,
+				NodeID:            nodeID,
+				OriginalAttemptID: dup.originalAttemptID,
+				OriginalNodeID:    dup.originalNodeID,
+				Agreement:         false,
+				Reason:            payload.ErrorCode,
+				OccurredAt:        payload.FailedAt,
+			})
+			return nil
+		}
 		apiErr := APIError{Code: CodeJobFailed, Message: payload.Message, Retryable: payload.Retryable, Status: 502}
 		return s.handleAttemptFailure(ctx, nodeID, payload.JobID, payload.AttemptID, apiErr, payload.Retryable, payload.FailedAt, payload.ErrorCode)
 	case protocol.TypeJobCompleted:
 		var payload protocol.JobCompletedPayload
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			return err
+		}
+		if s.isDuplicateAttempt(payload.AttemptID) {
+			return s.handleDuplicateCompletion(ctx, nodeID, payload)
 		}
 		if err := s.verifyCompletion(ctx, nodeID, payload); err != nil {
 			s.clearActive(nodeID)
@@ -280,10 +335,30 @@ func (s *Service) HandleNodeMessage(ctx context.Context, nodeID, sessionID strin
 			s.notify(payload.JobID, Result{Error: apiErr})
 			return nil
 		}
-		response, err := s.Store.CompleteJob(ctx, payload)
+		run := s.runSnapshot(payload.JobID)
+		var request protocol.ChatRequest
+		if run != nil {
+			request = run.request
+		}
+		issues, acceptanceErr := ValidateCompletionForAcceptance(request, payload)
+		if len(issues) > 0 {
+			_ = s.Store.RecordMeteringIssues(ctx, payload, issues, meteringStatus(issues), s.now())
+		}
+		if acceptanceErr != nil {
+			s.clearActive(nodeID)
+			apiErr := APIError{Code: CodeJobFailed, Message: acceptanceErr.Error(), Retryable: false, Status: 502}
+			_ = s.Store.FailJob(ctx, payload.JobID, payload.AttemptID, apiErr.Code, apiErr.Message, false, false, payload.CompletedAt)
+			s.removeRun(payload.JobID)
+			s.notify(payload.JobID, Result{Error: apiErr})
+			return nil
+		}
+		response, err := s.Store.CompleteJob(ctx, payload, s.now(), s.CreditHold, meteringStatus(issues))
 		s.clearActive(nodeID)
 		if err != nil {
 			return err
+		}
+		if run != nil {
+			s.maybeStartDuplicate(ctx, nodeID, payload, run)
 		}
 		s.removeRun(payload.JobID)
 		s.notify(payload.JobID, Result{Response: response})
@@ -292,6 +367,68 @@ func (s *Service) HandleNodeMessage(ctx context.Context, nodeID, sessionID strin
 	default:
 		return fmt.Errorf("unsupported node message %s", envelope.Type)
 	}
+}
+
+func (s *Service) handleDuplicateCompletion(ctx context.Context, nodeID string, payload protocol.JobCompletedPayload) error {
+	dup := s.removeDuplicateRun(payload.AttemptID)
+	s.clearActive(nodeID)
+	if dup == nil {
+		return fmt.Errorf("duplicate verification context is missing")
+	}
+	now := s.now()
+	if err := s.verifyCompletion(ctx, nodeID, payload); err != nil {
+		_ = s.Store.MarkVerificationAttemptFailed(ctx, payload.JobID, payload.AttemptID, CodeJobFailed, now)
+		_ = s.Store.RecordDuplicateOutcome(ctx, DuplicateOutcome{
+			JobID:             payload.JobID,
+			AttemptID:         payload.AttemptID,
+			NodeID:            nodeID,
+			OriginalAttemptID: dup.originalAttemptID,
+			OriginalNodeID:    dup.originalNodeID,
+			Agreement:         false,
+			Reason:            err.Error(),
+			OccurredAt:        now,
+		})
+		return nil
+	}
+	issues, acceptanceErr := ValidateCompletionForAcceptance(dup.request, payload)
+	agreement := acceptanceErr == nil && payload.Message != nil && payload.Message.Content == dup.expectedContent
+	reason := "matched"
+	if acceptanceErr != nil {
+		reason = acceptanceErr.Error()
+	} else if !agreement {
+		reason = "completion_disagreement"
+	}
+	if len(issues) > 0 {
+		_ = s.Store.RecordMeteringIssues(ctx, payload, issues, meteringStatus(issues), now)
+	}
+	if agreement {
+		if err := s.Store.MarkVerificationAttemptCompleted(ctx, payload.JobID, payload.AttemptID, now); err != nil {
+			return err
+		}
+	} else {
+		if err := s.Store.MarkVerificationAttemptFailed(ctx, payload.JobID, payload.AttemptID, reason, now); err != nil {
+			return err
+		}
+	}
+	if err := s.Store.RecordDuplicateOutcome(ctx, DuplicateOutcome{
+		JobID:             payload.JobID,
+		AttemptID:         payload.AttemptID,
+		NodeID:            nodeID,
+		OriginalAttemptID: dup.originalAttemptID,
+		OriginalNodeID:    dup.originalNodeID,
+		Agreement:         agreement,
+		Reason:            reason,
+		OccurredAt:        now,
+	}); err != nil {
+		return err
+	}
+	if acceptanceErr == nil {
+		if err := s.Store.PostVerificationOverhead(ctx, payload, s.CreditHold, now); err != nil {
+			s.logger().WarnContext(ctx, "verification overhead posting failed", "job_id", payload.JobID, "attempt_id", payload.AttemptID, "node_id", nodeID, "error", err)
+		}
+	}
+	s.logger().InfoContext(ctx, "duplicate verification completed", "job_id", payload.JobID, "attempt_id", payload.AttemptID, "node_id", nodeID, "agreement", agreement)
+	return nil
 }
 
 func (s *Service) verifyCompletion(ctx context.Context, nodeID string, payload protocol.JobCompletedPayload) error {
@@ -354,6 +491,135 @@ func (s *Service) prepareRetry(jobID, failedNodeID string) bool {
 	return true
 }
 
+func (s *Service) maybeStartDuplicate(ctx context.Context, originalNodeID string, payload protocol.JobCompletedPayload, run *runState) {
+	if run == nil || run.model.Verification.DuplicateSampleRate <= 0 || payload.Message == nil {
+		return
+	}
+	if !sampleByID(payload.JobID, run.model.Verification.DuplicateSampleRate) {
+		return
+	}
+	now := s.now()
+	staleAfter := s.StaleAfter
+	if staleAfter <= 0 {
+		staleAfter = 45 * time.Second
+	}
+	candidates, err := s.Store.EligibleNodes(ctx, run.model.ID, now.Add(-staleAfter))
+	if err != nil {
+		s.logger().WarnContext(ctx, "duplicate verification candidate lookup failed", "job_id", payload.JobID, "error", err)
+		return
+	}
+	s.mu.Lock()
+	s.initLocked()
+	filtered := candidates[:0]
+	for _, candidate := range candidates {
+		if candidate.NodeID == originalNodeID {
+			continue
+		}
+		session := s.sessions[candidate.NodeID]
+		if session.sessionID == "" || session.sessionID != candidate.SessionID {
+			continue
+		}
+		if _, busy := s.activeByNode[candidate.NodeID]; busy {
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	chosen, ok := s.Scheduler.Choose(filtered)
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	s.activeByNode[chosen.NodeID] = activeJob{jobID: payload.JobID}
+	session := s.sessions[chosen.NodeID]
+	s.mu.Unlock()
+
+	leaseTTL := s.LeaseTTL
+	if leaseTTL <= 0 {
+		leaseTTL = 10 * time.Second
+	}
+	deadlineAt := now.Add(30 * time.Second)
+	if s.SyncTimeout > 0 && s.SyncTimeout < 30*time.Second {
+		deadlineAt = now.Add(s.SyncTimeout)
+	}
+	attempt, err := s.Store.CreateVerificationAttempt(ctx, payload.JobID, chosen.NodeID, now.Add(leaseTTL), deadlineAt)
+	if err != nil {
+		s.clearActive(chosen.NodeID)
+		s.logger().WarnContext(ctx, "duplicate verification attempt create failed", "job_id", payload.JobID, "node_id", chosen.NodeID, "error", err)
+		return
+	}
+	s.setActive(chosen.NodeID, activeJob{jobID: payload.JobID, attemptID: attempt.AttemptID})
+	s.setDuplicateRun(attempt.AttemptID, &duplicateRun{
+		jobID:             payload.JobID,
+		attemptID:         attempt.AttemptID,
+		originalAttemptID: payload.AttemptID,
+		originalNodeID:    originalNodeID,
+		expectedContent:   payload.Message.Content,
+		model:             run.model,
+		request:           run.request,
+		deadlineAt:        deadlineAt,
+	})
+	offer := protocol.JobOfferPayload{
+		JobID:          payload.JobID,
+		AttemptID:      attempt.AttemptID,
+		LeaseExpiresAt: attempt.LeaseExpiresAt,
+		DeadlineAt:     attempt.DeadlineAt,
+		ModelID:        run.model.ID,
+		Request:        run.request,
+		Verification:   protocol.JobVerification{Kind: "duplicate"},
+	}
+	if err := session.send(ctx, protocol.TypeJobOffer, offer); err != nil {
+		s.clearActive(chosen.NodeID)
+		s.removeDuplicateRun(attempt.AttemptID)
+		_ = s.Store.MarkVerificationAttemptFailed(ctx, payload.JobID, attempt.AttemptID, CodeJobFailed, now)
+		s.logger().WarnContext(ctx, "duplicate verification offer failed", "job_id", payload.JobID, "attempt_id", attempt.AttemptID, "node_id", chosen.NodeID, "error", err)
+		return
+	}
+	s.logger().InfoContext(ctx, "duplicate verification offer sent", "job_id", payload.JobID, "attempt_id", attempt.AttemptID, "node_id", chosen.NodeID, "original_node_id", originalNodeID)
+}
+
+func (s *Service) runSnapshot(jobID string) *runState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initLocked()
+	run := s.runs[jobID]
+	if run == nil {
+		return nil
+	}
+	clone := *run
+	clone.excluded = nil
+	if run.excluded != nil {
+		clone.excluded = make(map[string]bool, len(run.excluded))
+		for key, value := range run.excluded {
+			clone.excluded[key] = value
+		}
+	}
+	return &clone
+}
+
+func (s *Service) isDuplicateAttempt(attemptID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initLocked()
+	_, ok := s.duplicates[attemptID]
+	return ok
+}
+
+func (s *Service) setDuplicateRun(attemptID string, run *duplicateRun) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initLocked()
+	s.duplicates[attemptID] = run
+}
+
+func (s *Service) removeDuplicateRun(attemptID string) *duplicateRun {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initLocked()
+	run := s.duplicates[attemptID]
+	delete(s.duplicates, attemptID)
+	return run
+}
+
 func (s *Service) removeRun(jobID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -398,6 +664,9 @@ func (s *Service) initLocked() {
 	if s.runs == nil {
 		s.runs = map[string]*runState{}
 	}
+	if s.duplicates == nil {
+		s.duplicates = map[string]*duplicateRun{}
+	}
 }
 
 func (s *Service) now() time.Time {
@@ -405,6 +674,18 @@ func (s *Service) now() time.Time {
 		return s.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func sampleByID(id string, rate float64) bool {
+	if rate <= 0 {
+		return false
+	}
+	if rate >= 1 {
+		return true
+	}
+	sum := sha256.Sum256([]byte(id))
+	value := binary.BigEndian.Uint64(sum[:8])
+	return float64(value)/float64(^uint64(0)) < rate
 }
 
 func (s *Service) logger() *slog.Logger {

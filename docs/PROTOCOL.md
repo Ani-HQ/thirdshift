@@ -83,6 +83,16 @@ Failed execution returns `job.failed` with a stable node-side error code and ret
 
 All job lifecycle envelopes are validated against `packages/protocol/schemas` before send and after receive.
 
+Milestone 5 uses the existing `job.offer.verification` object for verification work:
+
+- `kind: "standard"` is normal customer-visible work.
+- `kind: "duplicate"` is a sampled re-execution of an already completed job on a different eligible node.
+- `kind: "challenge"` is reserved for policy/operator challenge jobs with a `challenge_id`.
+
+The node path is intentionally the same for normal, duplicate, and challenge jobs. It still accepts, starts, executes locally, signs `job.completed`, and returns the result. The coordinator decides whether the result is customer-billable, verification overhead, or a challenge/reputation event.
+
+Duplicate verification never creates a second customer charge. A matching duplicate result records a `verification_events` agreement and posts verification host credit as platform overhead. A disagreement records a rejected verification event and updates reputation.
+
 ## Safety Events
 
 The node emits `node.safety_event` when thermal thresholds are crossed. The coordinator records these in `security_events` and excludes nodes from scheduling while heartbeats report `thermal_state` other than `normal`.

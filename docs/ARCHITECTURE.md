@@ -59,3 +59,15 @@ Milestone 4 closes the first reliability loop around routed jobs.
 - GPU telemetry drives `thermal_state`. Above the soft temperature limit the node drains and emits `node.safety_event`; after cooling below the hysteresis threshold it can become `AVAILABLE` again. A hard limit during a job cancels the runtime request and reports a retryable safety failure.
 - The scheduler retries transient attempt failures exactly once on a different eligible node. The successful attempt partial index still prevents more than one accepted success for a job.
 - Node and coordinator logs use structured `slog` records with a shared redaction handler. Logs carry request, job, attempt, and node IDs but not prompt text, completion text, API keys, invite tokens, access tokens, or private keys.
+
+## Verification And Ledger
+
+Milestone 5 closes the first accounting loop.
+
+- The coordinator accepts credit only for results with a valid lease, timely acceptance, timely completion, matching model/runtime hashes, valid node signature, plausible shape and usage, verification acceptance, and no previous successful attempt.
+- Node-reported token counts are treated as untrusted. The coordinator records prompt/completion counts, coordinator-observed duration, price version, and metering status; implausible reports are rejected or recorded as verification events.
+- Accepted jobs post one balanced ledger transaction in integer microdollars: customer usage charge, host pending credit, and platform margin. Result persistence, job success, and ledger posting commit together.
+- Duplicate verification samples completed jobs using the per-model sample rate and routes a second `job.offer` with `verification.kind=duplicate` to another eligible node when available. Customer charges are not duplicated; verification host credit is posted as platform overhead.
+- Challenge outcomes update reputation and can quarantine a node after repeated failures. A single disagreement is recorded but does not quarantine.
+- Reputation now tracks accepted jobs, attempt success, timeouts, hash mismatches, challenge pass rate, duplicate disagreement rate, and session stability defaults. Scheduler scoring consumes the rolling success rate.
+- Host credits remain pending until the hold elapses and an operator runs `admin-cli credits release`. Payout batches reserve available credits, export immutable CSV rows, and confirm payment by posting the payout ledger transaction.

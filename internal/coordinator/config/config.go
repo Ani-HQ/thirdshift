@@ -27,6 +27,7 @@ const (
 	envSchedulerThermal   = "THIRDSHIFT_SCHEDULER_WEIGHT_THERMAL"
 	envSchedulerFairness  = "THIRDSHIFT_SCHEDULER_WEIGHT_FAIRNESS"
 	envSchedulerRegion    = "THIRDSHIFT_SCHEDULER_WEIGHT_REGION"
+	envCreditHoldSeconds  = "THIRDSHIFT_CREDIT_HOLD_SECONDS"
 )
 
 type Config struct {
@@ -40,6 +41,7 @@ type Config struct {
 	SessionStaleAfter  time.Duration
 	StaleSweepInterval time.Duration
 	SchedulerWeights   jobs.SchedulerWeights
+	CreditHold         time.Duration
 }
 
 func Load(defaultVersion string) Config {
@@ -52,6 +54,7 @@ func Load(defaultVersion string) Config {
 		HeartbeatInterval:  durationSeconds(envHeartbeatSeconds, 15*time.Second),
 		SessionStaleAfter:  durationSeconds(envStaleAfterSeconds, 45*time.Second),
 		StaleSweepInterval: durationSeconds(envSweepSeconds, 15*time.Second),
+		CreditHold:         durationSeconds(envCreditHoldSeconds, 24*time.Hour),
 		SchedulerWeights: jobs.SchedulerWeights{
 			WarmModelBonus:            floatEnv(envSchedulerWarm, weights.WarmModelBonus),
 			RollingSuccessRate:        floatEnv(envSchedulerSuccess, weights.RollingSuccessRate),
