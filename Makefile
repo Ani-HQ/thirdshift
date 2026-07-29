@@ -1,7 +1,7 @@
 GO ?= go
 MIGRATIONS_DIR ?= migrations
 
-.PHONY: build test lint migrate dev test-slice test-integration build-windows doctor-json run-local coordinator org catalog-sync apikey fake-runtime chat-demo invite nodes start status
+.PHONY: build test lint migrate dev test-slice test-integration build-windows doctor-json run-local coordinator org catalog-sync apikey fake-runtime chat-demo invite nodes start status configure pause resume
 
 build:
 	$(GO) build ./...
@@ -63,3 +63,12 @@ start:
 
 status:
 	$(GO) run ./cmd/thirdshift status
+
+configure:
+	$(GO) run ./cmd/thirdshift configure --from "$${THIRDSHIFT_SCHEDULE_FROM:-23:00}" --until "$${THIRDSHIFT_SCHEDULE_UNTIL:-08:00}"
+
+pause:
+	$(GO) run ./cmd/thirdshift pause
+
+resume:
+	$(GO) run ./cmd/thirdshift resume

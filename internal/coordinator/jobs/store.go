@@ -428,10 +428,21 @@ JOIN LATERAL (
   ORDER BY connected_at DESC
   LIMIT 1
 ) ns ON true
+JOIN LATERAL (
+  SELECT schedule_state, thermal_state, paused, draining
+  FROM node_heartbeats
+  WHERE node_id = n.id AND session_id = ns.id
+  ORDER BY received_at DESC
+  LIMIT 1
+) hb ON true
 WHERE n.state = 'AVAILABLE'
   AND n.current_model_id = $1
   AND n.quarantined_at IS NULL
   AND ns.freshness >= $2
+  AND hb.schedule_state = 'in_window'
+  AND hb.thermal_state = 'normal'
+  AND hb.paused = false
+  AND hb.draining = false
   AND NOT EXISTS (
     SELECT 1 FROM job_attempts ja
     WHERE ja.node_id = n.id AND ja.status IN ('offered', 'accepted', 'running')
@@ -444,7 +455,7 @@ WHERE n.state = 'AVAILABLE'
 }
 
 func (s PGStore) EligibleNodes(ctx context.Context, modelID string, freshnessCutoff time.Time) ([]Candidate, error) {
-	// TODO(M4/M5): add host schedule, data-class, and richer reputation
+	// TODO(M5): add data-class and richer reputation
 	// filters once those inputs are persisted.
 	rows, err := s.Pool.Query(ctx, `
 SELECT n.id, ns.id, hb.model_hash, hb.runtime_hash,
@@ -458,7 +469,7 @@ JOIN LATERAL (
   LIMIT 1
 ) ns ON true
 JOIN LATERAL (
-  SELECT model_hash, runtime_hash
+  SELECT model_hash, runtime_hash, schedule_state, thermal_state, paused, draining
   FROM node_heartbeats
   WHERE node_id = n.id AND session_id = ns.id
   ORDER BY received_at DESC
@@ -474,6 +485,10 @@ WHERE n.state = 'AVAILABLE'
   AND ns.freshness >= $2
   AND hb.model_hash = 'sha256:' || ma.sha256
   AND hb.runtime_hash = 'sha256:' || rr.binary_sha256
+  AND hb.schedule_state = 'in_window'
+  AND hb.thermal_state = 'normal'
+  AND hb.paused = false
+  AND hb.draining = false
   AND NOT EXISTS (
     SELECT 1 FROM job_attempts ja
     WHERE ja.node_id = n.id AND ja.status IN ('offered', 'accepted', 'running')
@@ -612,6 +627,8 @@ func (s PGStore) CompleteJob(ctx context.Context, payload protocol.JobCompletedP
 	}
 	dataClass := "public_or_non_sensitive"
 	_ = s.Pool.QueryRow(ctx, "SELECT data_class FROM models WHERE id = $1", payload.ModelID).Scan(&dataClass)
+	attempts := 1
+	_ = s.Pool.QueryRow(ctx, "SELECT count(*) FROM job_attempts WHERE job_id = $1", payload.JobID).Scan(&attempts)
 	response := OpenAIResponse{
 		ID:      strings.Replace(resultID, "res_", "chatcmpl_", 1),
 		Object:  "chat.completion",
@@ -625,7 +642,7 @@ func (s PGStore) CompleteJob(ctx context.Context, payload protocol.JobCompletedP
 		Usage: payload.Usage,
 		Thirdshift: ThirdshiftResponseMeta{
 			JobID:        payload.JobID,
-			Attempts:     1,
+			Attempts:     attempts,
 			DataClass:    dataClass,
 			ServedRegion: "local",
 		},
@@ -658,6 +675,32 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, true, $10)
 		return OpenAIResponse{}, fmt.Errorf("commit complete job: %w", err)
 	}
 	return response, nil
+}
+
+func (s PGStore) FailAttempt(ctx context.Context, jobID, attemptID, code string, transient bool, now time.Time) error {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin fail attempt: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(ctx, `
+UPDATE job_attempts
+SET status = 'failed', transient_failure = $4, error_code = $5, finished_at = $3
+WHERE id = $1 AND job_id = $2 AND status IN ('offered', 'accepted', 'running')
+`, attemptID, jobID, now, transient, code); err != nil {
+		return fmt.Errorf("mark attempt failed: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE jobs
+SET state = 'queued', updated_at = $2
+WHERE id = $1 AND state IN ('leased', 'running')
+`, jobID, now); err != nil {
+		return fmt.Errorf("mark job queued after attempt failure: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit fail attempt: %w", err)
+	}
+	return nil
 }
 
 func (s PGStore) FailJob(ctx context.Context, jobID, attemptID, code, message string, retryable bool, transient bool, now time.Time) error {
@@ -733,38 +776,29 @@ WHERE j.id = $1 AND j.organization_id = $2
 	return status, nil
 }
 
-func (s PGStore) ExpireLeases(ctx context.Context, now time.Time) (int64, error) {
+func (s PGStore) ExpireLeases(ctx context.Context, now time.Time) ([]ExpiredAttempt, error) {
 	rows, err := s.Pool.Query(ctx, `
 UPDATE job_attempts
 SET status = 'expired', transient_failure = true, error_code = $2, finished_at = $1
 WHERE status = 'offered' AND lease_expires_at <= $1
-RETURNING job_id
+RETURNING job_id, id, node_id
 `, now, CodeJobTimeout)
 	if err != nil {
-		return 0, fmt.Errorf("expire leases: %w", err)
+		return nil, fmt.Errorf("expire leases: %w", err)
 	}
 	defer rows.Close()
-	var jobIDs []string
+	var expired []ExpiredAttempt
 	for rows.Next() {
-		var jobID string
-		if err := rows.Scan(&jobID); err != nil {
-			return 0, fmt.Errorf("scan expired lease: %w", err)
+		var attempt ExpiredAttempt
+		if err := rows.Scan(&attempt.JobID, &attempt.AttemptID, &attempt.NodeID); err != nil {
+			return nil, fmt.Errorf("scan expired lease: %w", err)
 		}
-		jobIDs = append(jobIDs, jobID)
+		expired = append(expired, attempt)
 	}
 	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate expired leases: %w", err)
+		return nil, fmt.Errorf("iterate expired leases: %w", err)
 	}
-	for _, jobID := range jobIDs {
-		if _, err := s.Pool.Exec(ctx, `
-UPDATE jobs
-SET state = 'failed', updated_at = $2, completed_at = $2
-WHERE id = $1 AND state = 'leased'
-`, jobID, now); err != nil {
-			return 0, fmt.Errorf("mark expired job failed: %w", err)
-		}
-	}
-	return int64(len(jobIDs)), nil
+	return expired, nil
 }
 
 func (s PGStore) IdempotencyRecord(ctx context.Context, apiKeyID, endpoint, key string) (IdempotencyRecord, bool, error) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +16,7 @@ import (
 	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
 	"github.com/anianroid/thirdshift/internal/coordinator/registration"
 	"github.com/anianroid/thirdshift/internal/coordinator/sessions"
+	"github.com/anianroid/thirdshift/internal/shared/logging"
 	"github.com/anianroid/thirdshift/internal/shared/protocol"
 	"github.com/anianroid/thirdshift/internal/shared/version"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,7 +31,7 @@ func main() {
 
 func run() error {
 	cfg := config.Load(version.Version)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{}))
+	logger := logging.NewTextLogger(os.Stderr)
 
 	handler := httpapi.NewMux(cfg.Version)
 	var pool *pgxpool.Pool
@@ -59,6 +59,7 @@ func run() error {
 			StaleAfter:  cfg.SessionStaleAfter,
 			LeaseTTL:    10 * time.Second,
 			SyncTimeout: 120 * time.Second,
+			Logger:      logger,
 		}
 		validator, err := protocolValidator()
 		if err != nil {
@@ -76,6 +77,7 @@ func run() error {
 			CatalogDir:        "models/catalog",
 			OperatorToken:     cfg.OperatorToken,
 			HeartbeatInterval: cfg.HeartbeatInterval,
+			Logger:            logger,
 		})
 	}
 

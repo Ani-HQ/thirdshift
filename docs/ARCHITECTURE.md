@@ -49,3 +49,13 @@ Milestone 3 adds the first coordinator-mediated inference path.
 - The node executor accepts one eligible offer, transitions to `BUSY`, calls the loopback llama-compatible runtime, signs `job.completed` with the node identity key, and returns to `AVAILABLE`.
 - The coordinator verifies the node signature and model/runtime hashes before accepting the result, storing it, completing the job, and waking the waiting sync request.
 - `Idempotency-Key` records map a request hash to the completed job response; duplicate matching requests replay the same stored response without re-execution.
+
+## Safety And Reliability
+
+Milestone 4 closes the first reliability loop around routed jobs.
+
+- Host schedules are stored in node config as local `HH:MM` windows. The node heartbeats `schedule_state`, and the coordinator excludes `out_of_window` nodes from scheduling.
+- `thirdshift pause` and `thirdshift resume` use the local control channel. Pause moves an idle node to `PAUSED`; a busy node moves to `DRAINING` and finishes the in-flight job before pausing. Paused nodes unload the model after a configurable idle timeout.
+- GPU telemetry drives `thermal_state`. Above the soft temperature limit the node drains and emits `node.safety_event`; after cooling below the hysteresis threshold it can become `AVAILABLE` again. A hard limit during a job cancels the runtime request and reports a retryable safety failure.
+- The scheduler retries transient attempt failures exactly once on a different eligible node. The successful attempt partial index still prevents more than one accepted success for a job.
+- Node and coordinator logs use structured `slog` records with a shared redaction handler. Logs carry request, job, attempt, and node IDs but not prompt text, completion text, API keys, invite tokens, access tokens, or private keys.

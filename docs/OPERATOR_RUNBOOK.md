@@ -138,3 +138,51 @@ kill "$THIRDSHIFT_NODE_PID"
 ```
 
 Expected result: the curl response has `object: "chat.completion"`, one assistant message, `usage`, and a `thirdshift` object containing `job_id`, `attempts`, `data_class`, and `served_region`.
+
+## Milestone 4 Safety And Reliability Drill
+
+Use the Milestone 3 setup with one coordinator, one fake runtime, and one node.
+
+Configure an overnight host window and verify status:
+
+```sh
+export THIRDSHIFT_NODE_DATA_DIR="$(pwd)/.local/thirdshift-m3-node"
+
+go run ./cmd/thirdshift configure --data-dir "$THIRDSHIFT_NODE_DATA_DIR" --from 23:00 --until 08:00 --max-temp 78 --hard-temp 88 --thermal-hysteresis 5
+go run ./cmd/thirdshift status --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
+go run ./cmd/admin-cli nodes list --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+```
+
+Pause and resume:
+
+```sh
+go run ./cmd/thirdshift pause --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
+go run ./cmd/thirdshift status --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
+go run ./cmd/admin-cli nodes list --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+
+go run ./cmd/thirdshift resume --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
+go run ./cmd/thirdshift status --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
+```
+
+Drain behavior:
+
+```sh
+# In one terminal, send a normal chat completion request.
+make chat-demo
+
+# While a real long-running request is active, pause should show DRAINING.
+go run ./cmd/thirdshift pause --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
+go run ./cmd/thirdshift status --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
+```
+
+Expected result: an idle paused node is not assigned new work. If a request is already running, the node reports `DRAINING`, completes that request, then reports `PAUSED`.
+
+Thermal drill on a Windows NVIDIA host:
+
+```powershell
+nvidia-smi --query-gpu=name,temperature.gpu,power.draw,power.limit --format=csv,noheader,nounits
+go run ./cmd/thirdshift status --data-dir $env:THIRDSHIFT_NODE_DATA_DIR
+go run ./cmd/admin-cli nodes list --coordinator $env:THIRDSHIFT_COORDINATOR_URL --operator-token $env:THIRDSHIFT_OPERATOR_TOKEN
+```
+
+Expected result: normal temperatures show `thermal_state: normal`. Test-only scripted telemetry covers warm/hard-limit transitions in CI; do not induce unsafe temperatures on real hardware.

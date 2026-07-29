@@ -194,6 +194,14 @@ func (f *fakeSessionStore) RecordHeartbeat(_ context.Context, sessionID string, 
 	return nil
 }
 
+func (f *fakeSessionStore) RecordStateChanged(context.Context, protocol.NodeStateChangedPayload, time.Time) error {
+	return nil
+}
+
+func (f *fakeSessionStore) RecordSafetyEvent(context.Context, protocol.NodeSafetyEventPayload, time.Time) error {
+	return nil
+}
+
 func (f *fakeSessionStore) CloseSession(context.Context, string, string, time.Time) error {
 	return nil
 }

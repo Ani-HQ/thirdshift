@@ -62,6 +62,13 @@ The persistent node session uses `GET /v1/node/session` with `Authorization: Bea
 
 After `session.accepted`, the node sends `node.heartbeat` every 15 seconds by default. The coordinator validates each envelope against `packages/protocol/schemas`, inserts a `node_heartbeats` row, updates `node_sessions.last_heartbeat_at`, and updates `nodes.state` plus `nodes.last_seen_at`.
 
+Milestone 4 adds optional heartbeat eligibility fields:
+
+- `schedule_state`: `in_window` or `out_of_window`
+- `thermal_state`: `normal`, `warm`, or `hard_limit`
+- `paused`: true when the host has requested pause
+- `draining`: true while the host is finishing current work but refusing new offers
+
 A coordinator sweeper marks a connected session stale after 45 seconds without a valid heartbeat. Stale or closed sessions make the scheduler-visible node state `OFFLINE`. The node reconnect loop uses exponential backoff with jitter and keeps one outbound WebSocket session active.
 
 ## Job Lifecycle
@@ -72,9 +79,15 @@ For Milestone 3, the node executes one job at a time. It rejects an offer if the
 
 Successful execution returns `job.completed` with assistant message content, usage, duration, finish reason, model hash, runtime hash, and a `signature` object. The Ed25519 signature is computed over the `job.completed` payload with `signature` omitted. The coordinator verifies the active node public key and the expected model/runtime hashes before persisting `job_results` and marking the job `succeeded`.
 
-Failed execution returns `job.failed` with a stable node-side error code and retryability flag. Rejected offers return `job.rejected`. In Milestone 3, a failed or rejected attempt fails the job; retry-on-another-node is deferred.
+Failed execution returns `job.failed` with a stable node-side error code and retryability flag. Rejected offers return `job.rejected`. In Milestone 4, transient failures such as disconnects, lease expiry, runtime crash, and safety-limit termination retry exactly once on a different eligible node. Permanent validation failures are not retried.
 
 All job lifecycle envelopes are validated against `packages/protocol/schemas` before send and after receive.
+
+## Safety Events
+
+The node emits `node.safety_event` when thermal thresholds are crossed. The coordinator records these in `security_events` and excludes nodes from scheduling while heartbeats report `thermal_state` other than `normal`.
+
+Schedule and pause state are also scheduler inputs. A node outside its configured local window, `PAUSED`, or `DRAINING` must not receive new `job.offer` messages. If a job is already running when pause or thermal drain starts, the node finishes the in-flight request unless a hard safety limit cancels the runtime request.
 
 ## Public API
 

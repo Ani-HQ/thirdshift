@@ -146,6 +146,7 @@ func (o Options) chatCompletionsHandler() developerHandler {
 					return
 				}
 				if decision.Replay {
+					o.logger().InfoContext(r.Context(), "idempotent chat completion replayed", "request_id", requestID, "job_id", record.JobID, "api_key_id", principal.ID)
 					writeJSON(w, decision.Status, json.RawMessage(decision.Body))
 					return
 				}
@@ -162,6 +163,7 @@ func (o Options) chatCompletionsHandler() developerHandler {
 			o.writeAPIError(w, jobs.APIError{Code: jobs.CodeInternalError, Message: "Could not create job.", Retryable: true, Status: 500}, requestID)
 			return
 		}
+		o.logger().InfoContext(r.Context(), "chat completion queued", "request_id", requestID, "job_id", jobID, "api_key_id", principal.ID, "model", model.ID)
 		waitCh := o.JobService.RegisterWait(jobID)
 		if _, err := o.JobService.Schedule(r.Context(), jobID, model, chatRequest, deadlineAt); err != nil {
 			o.JobService.AbandonWait(jobID)
@@ -182,6 +184,7 @@ func (o Options) chatCompletionsHandler() developerHandler {
 				o.writeAPIError(w, result.Error, requestID)
 				return
 			}
+			o.logger().InfoContext(r.Context(), "chat completion completed", "request_id", requestID, "job_id", jobID, "api_key_id", principal.ID, "attempts", result.Response.Thirdshift.Attempts)
 			if idempotencyKey != "" {
 				_ = o.JobService.Store.StoreIdempotencyResponse(r.Context(), principal.ID, chatCompletionsEndpoint, idempotencyKey, bodyHash, jobID, http.StatusOK, result.Response, o.now().Add(24*time.Hour))
 				if record, found, err := o.JobService.Store.IdempotencyRecord(r.Context(), principal.ID, chatCompletionsEndpoint, idempotencyKey); err == nil && found && record.ResponseStatus > 0 {

@@ -16,6 +16,7 @@ import (
 	"github.com/anianroid/thirdshift/internal/node/hardware"
 	"github.com/anianroid/thirdshift/internal/node/local"
 	noderegistration "github.com/anianroid/thirdshift/internal/node/registration"
+	nodeschedule "github.com/anianroid/thirdshift/internal/node/schedule"
 	"github.com/anianroid/thirdshift/internal/shared/version"
 )
 
@@ -38,6 +39,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "doctor":
 		return runDoctor(args[1:])
+	case "configure":
+		return runConfigure(args[1:])
 	case "login":
 		return runLogin(args[1:])
 	case "start":
@@ -82,6 +85,54 @@ func runLogin(args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "node %s: %s\n", action, result.Credentials.NodeID)
 	fmt.Fprintf(os.Stdout, "credentials: %s\n", result.Credentials.CoordinatorURL)
+	return nil
+}
+
+func runConfigure(args []string) error {
+	fs := flag.NewFlagSet("configure", flag.ContinueOnError)
+	dataDir := fs.String("data-dir", os.Getenv("THIRDSHIFT_NODE_DATA_DIR"), "node data directory")
+	from := fs.String("from", "", "local schedule start in HH:MM")
+	until := fs.String("until", "", "local schedule end in HH:MM")
+	maxTemp := fs.Int("max-temp", 0, "GPU temperature soft limit in Celsius")
+	hardTemp := fs.Int("hard-temp", 0, "GPU temperature hard limit in Celsius")
+	hysteresis := fs.Int("thermal-hysteresis", 0, "thermal recovery margin in Celsius")
+	pauseIdleTimeout := fs.Duration("pause-idle-timeout", 0, "duration before paused node unloads model")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := nodeconfig.Load(*dataDir)
+	if err != nil {
+		return err
+	}
+	if *from != "" {
+		cfg.ScheduleFrom = *from
+	}
+	if *until != "" {
+		cfg.ScheduleUntil = *until
+	}
+	if cfg.ScheduleFrom == "" || cfg.ScheduleUntil == "" {
+		return fmt.Errorf("schedule requires both --from and --until in HH:MM")
+	}
+	if _, err := nodeschedule.ParseWindow(cfg.ScheduleFrom, cfg.ScheduleUntil); err != nil {
+		return err
+	}
+	if *maxTemp > 0 {
+		cfg.MaxTempC = *maxTemp
+	}
+	if *hardTemp > 0 {
+		cfg.HardTempC = *hardTemp
+	}
+	if *hysteresis > 0 {
+		cfg.ThermalHysteresis = *hysteresis
+	}
+	if *pauseIdleTimeout > 0 {
+		cfg.PauseIdleTimeout = *pauseIdleTimeout
+	}
+	if err := nodeconfig.Save(cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "schedule: %s-%s\n", cfg.ScheduleFrom, cfg.ScheduleUntil)
+	fmt.Fprintf(os.Stdout, "temperature: max=%d C hard=%d C hysteresis=%d C\n", cfg.MaxTempC, cfg.HardTempC, cfg.ThermalHysteresis)
 	return nil
 }
 
@@ -133,6 +184,12 @@ func runStart(args []string) error {
 		NodeID:            login.Credentials.NodeID,
 		HeartbeatInterval: *heartbeatInterval,
 		Runtime:           runtimeProvider,
+		ScheduleFrom:      cfg.ScheduleFrom,
+		ScheduleUntil:     cfg.ScheduleUntil,
+		MaxTempC:          cfg.MaxTempC,
+		HardTempC:         cfg.HardTempC,
+		ThermalHysteresis: cfg.ThermalHysteresis,
+		PauseIdleTimeout:  cfg.PauseIdleTimeout,
 		Output:            os.Stdout,
 	})
 }
@@ -240,6 +297,10 @@ func printStatus(status *control.Status) {
 	fmt.Fprintf(os.Stdout, "runtime hash: %s\n", dash(status.RuntimeHash))
 	fmt.Fprintf(os.Stdout, "model hash: %s\n", dash(status.ModelHash))
 	fmt.Fprintf(os.Stdout, "schedule: %s\n", dash(status.Schedule))
+	fmt.Fprintf(os.Stdout, "schedule state: %s\n", dash(status.ScheduleState))
+	fmt.Fprintf(os.Stdout, "thermal state: %s\n", dash(status.ThermalState))
+	fmt.Fprintf(os.Stdout, "paused: %t\n", status.Paused)
+	fmt.Fprintf(os.Stdout, "draining: %t\n", status.Draining)
 	if status.TemperatureC != nil {
 		fmt.Fprintf(os.Stdout, "temperature: %d C\n", *status.TemperatureC)
 	} else {
@@ -274,6 +335,7 @@ func printUsage(w *os.File) {
 	fmt.Fprintf(w, "thirdshift %s\n", version.Version)
 	fmt.Fprintln(w, "usage:")
 	fmt.Fprintln(w, "  thirdshift doctor [--json]")
+	fmt.Fprintln(w, "  thirdshift configure --from HH:MM --until HH:MM")
 	fmt.Fprintln(w, "  thirdshift login --invite <token> --coordinator <url>")
 	fmt.Fprintln(w, "  thirdshift start [--runtime-base-url http://127.0.0.1:<port>]")
 	fmt.Fprintln(w, "  thirdshift status [--json]")

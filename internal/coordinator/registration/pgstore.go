@@ -24,6 +24,10 @@ type NodeSummary struct {
 	LastSeenAt      *time.Time `json:"last_seen_at,omitempty"`
 	SessionStatus   string     `json:"session_status"`
 	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
+	ScheduleState   string     `json:"schedule_state,omitempty"`
+	ThermalState    string     `json:"thermal_state,omitempty"`
+	Paused          bool       `json:"paused"`
+	Draining        bool       `json:"draining"`
 }
 
 func (s PGStore) CreateInvite(ctx context.Context, invite InviteRecord) error {
@@ -198,9 +202,9 @@ func (s PGStore) RecordHeartbeat(ctx context.Context, sessionID string, heartbea
 	}
 	defer tx.Rollback(context.Background())
 	if _, err := tx.Exec(ctx, `
-INSERT INTO node_heartbeats (id, node_id, session_id, sequence, state, model_id, runtime_hash, model_hash, gpu, active_job_id, uptime_seconds, received_at, sent_at)
-VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), $9::jsonb, $10, $11, $12, $13);
-`, heartbeatID, heartbeat.NodeID, sessionID, heartbeat.Sequence, heartbeat.State, heartbeat.ModelID, heartbeat.RuntimeHash, heartbeat.ModelHash, string(gpu), heartbeat.ActiveJobID, heartbeat.UptimeSeconds, receivedAt, heartbeat.Timestamp); err != nil {
+INSERT INTO node_heartbeats (id, node_id, session_id, sequence, state, model_id, runtime_hash, model_hash, gpu, active_job_id, schedule_state, thermal_state, paused, draining, uptime_seconds, received_at, sent_at)
+VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), $9::jsonb, $10, NULLIF($11, ''), NULLIF($12, ''), $13, $14, $15, $16, $17);
+`, heartbeatID, heartbeat.NodeID, sessionID, heartbeat.Sequence, heartbeat.State, heartbeat.ModelID, heartbeat.RuntimeHash, heartbeat.ModelHash, string(gpu), heartbeat.ActiveJobID, heartbeat.ScheduleState, heartbeat.ThermalState, heartbeat.Paused, heartbeat.Draining, heartbeat.UptimeSeconds, receivedAt, heartbeat.Timestamp); err != nil {
 		return fmt.Errorf("insert heartbeat: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -219,6 +223,48 @@ WHERE id = $1;
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit record heartbeat: %w", err)
+	}
+	return nil
+}
+
+func (s PGStore) RecordStateChanged(ctx context.Context, stateChanged protocol.NodeStateChangedPayload, receivedAt time.Time) error {
+	if s.Pool == nil {
+		return ErrRepositoryMissing
+	}
+	_, err := s.Pool.Exec(ctx, `
+UPDATE nodes
+SET state = $2, last_seen_at = $3, updated_at = $3
+WHERE id = $1
+`, stateChanged.NodeID, stateChanged.State, receivedAt)
+	if err != nil {
+		return fmt.Errorf("record state change: %w", err)
+	}
+	return nil
+}
+
+func (s PGStore) RecordSafetyEvent(ctx context.Context, event protocol.NodeSafetyEventPayload, receivedAt time.Time) error {
+	if s.Pool == nil {
+		return ErrRepositoryMissing
+	}
+	eventID, err := ids.New("sec")
+	if err != nil {
+		return err
+	}
+	metadata, err := json.Marshal(map[string]any{
+		"message":       event.Message,
+		"temperature_c": event.TemperatureC,
+		"power_w":       event.PowerW,
+		"occurred_at":   event.OccurredAt,
+		"received_at":   receivedAt,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal safety metadata: %w", err)
+	}
+	if _, err := s.Pool.Exec(ctx, `
+INSERT INTO security_events (id, severity, event_type, node_id, metadata, created_at)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+`, eventID, event.Severity, event.EventCode, event.NodeID, string(metadata), receivedAt); err != nil {
+		return fmt.Errorf("insert safety event: %w", err)
 	}
 	return nil
 }
@@ -280,7 +326,8 @@ func (s PGStore) ListNodes(ctx context.Context) ([]NodeSummary, error) {
 	}
 	rows, err := s.Pool.Query(ctx, `
 SELECT n.id, n.state, COALESCE(n.current_model_id, ''), n.last_seen_at,
-       COALESCE(latest.state, 'none'), latest.last_heartbeat_at
+       COALESCE(latest.state, 'none'), latest.last_heartbeat_at,
+       COALESCE(hb.schedule_state, ''), COALESCE(hb.thermal_state, ''), COALESCE(hb.paused, false), COALESCE(hb.draining, false)
 FROM nodes n
 LEFT JOIN LATERAL (
   SELECT state, last_heartbeat_at
@@ -289,6 +336,13 @@ LEFT JOIN LATERAL (
   ORDER BY connected_at DESC
   LIMIT 1
 ) latest ON true
+LEFT JOIN LATERAL (
+  SELECT schedule_state, thermal_state, paused, draining
+  FROM node_heartbeats
+  WHERE node_id = n.id
+  ORDER BY received_at DESC
+  LIMIT 1
+) hb ON true
 ORDER BY n.id
 `)
 	if err != nil {
@@ -299,7 +353,7 @@ ORDER BY n.id
 	var nodes []NodeSummary
 	for rows.Next() {
 		var node NodeSummary
-		if err := rows.Scan(&node.ID, &node.State, &node.CurrentModelID, &node.LastSeenAt, &node.SessionStatus, &node.LastHeartbeatAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.State, &node.CurrentModelID, &node.LastSeenAt, &node.SessionStatus, &node.LastHeartbeatAt, &node.ScheduleState, &node.ThermalState, &node.Paused, &node.Draining); err != nil {
 			return nil, fmt.Errorf("scan node summary: %w", err)
 		}
 		nodes = append(nodes, node)

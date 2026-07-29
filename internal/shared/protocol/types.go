@@ -147,6 +147,10 @@ type NodeHeartbeatPayload struct {
 	ModelHash     string    `json:"model_hash,omitempty"`
 	GPU           GPUStatus `json:"gpu"`
 	ActiveJobID   *string   `json:"active_job_id"`
+	ScheduleState string    `json:"schedule_state,omitempty"`
+	ThermalState  string    `json:"thermal_state,omitempty"`
+	Paused        bool      `json:"paused,omitempty"`
+	Draining      bool      `json:"draining,omitempty"`
 	UptimeSeconds int64     `json:"uptime_seconds"`
 	Timestamp     time.Time `json:"timestamp"`
 }

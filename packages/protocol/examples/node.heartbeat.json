@@ -20,8 +20,11 @@
       "utilization_percent": 4
     },
     "active_job_id": null,
+    "schedule_state": "in_window",
+    "thermal_state": "normal",
+    "paused": false,
+    "draining": false,
     "uptime_seconds": 19420,
     "timestamp": "2026-07-29T08:00:00Z"
   }
 }
-

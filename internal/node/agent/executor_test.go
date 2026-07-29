@@ -58,7 +58,7 @@ func TestAgentExecutesOfferAndSignsCompletion(t *testing.T) {
 		for {
 			envelope := readAnyEnvelope(t, validator, conn)
 			switch envelope.Type {
-			case protocol.TypeNodeHeartbeat, protocol.TypeJobAccepted, protocol.TypeJobStarted:
+			case protocol.TypeNodeHeartbeat, protocol.TypeNodeStateChanged, protocol.TypeJobAccepted, protocol.TypeJobStarted:
 			case protocol.TypeJobCompleted:
 				var payload protocol.JobCompletedPayload
 				if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
@@ -178,7 +178,7 @@ func TestAgentRejectsExpiredOfferAndMissingHashes(t *testing.T) {
 				for {
 					envelope := readAnyEnvelope(t, validator, conn)
 					switch envelope.Type {
-					case protocol.TypeNodeHeartbeat:
+					case protocol.TypeNodeHeartbeat, protocol.TypeNodeStateChanged:
 					case protocol.TypeJobRejected:
 						var payload protocol.JobRejectedPayload
 						if err := json.Unmarshal(envelope.Payload, &payload); err != nil {

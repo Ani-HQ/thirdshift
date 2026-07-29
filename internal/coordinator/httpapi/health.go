@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -37,11 +39,14 @@ type Options struct {
 	OperatorToken     string
 	HeartbeatInterval time.Duration
 	Now               func() time.Time
+	Logger            *slog.Logger
 }
 
 type SessionStore interface {
 	OpenSession(ctx context.Context, nodeID, protocolVersion, remoteAddr string, now time.Time) (string, error)
 	RecordHeartbeat(ctx context.Context, sessionID string, heartbeat protocol.NodeHeartbeatPayload, receivedAt time.Time) error
+	RecordStateChanged(ctx context.Context, stateChanged protocol.NodeStateChangedPayload, receivedAt time.Time) error
+	RecordSafetyEvent(ctx context.Context, event protocol.NodeSafetyEventPayload, receivedAt time.Time) error
 	CloseSession(ctx context.Context, sessionID, nodeID string, now time.Time) error
 	ListNodes(ctx context.Context) ([]registration.NodeSummary, error)
 	PublicKeyForNode(ctx context.Context, nodeID string) (string, error)
@@ -336,6 +341,38 @@ func (o Options) handleSession(ctx context.Context, conn *websocket.Conn, tokenN
 				_ = conn.Close(websocket.StatusInternalError, "heartbeat store failed")
 				return
 			}
+		case protocol.TypeNodeStateChanged:
+			var stateChanged protocol.NodeStateChangedPayload
+			if err := json.Unmarshal(envelope.Payload, &stateChanged); err != nil {
+				_ = conn.Close(websocket.StatusPolicyViolation, "invalid state change payload")
+				return
+			}
+			if stateChanged.NodeID != tokenNodeID {
+				_ = conn.Close(websocket.StatusPolicyViolation, "node identity mismatch")
+				return
+			}
+			if _, err := nodestate.Parse(stateChanged.State); err != nil {
+				_ = conn.Close(websocket.StatusPolicyViolation, "invalid node state")
+				return
+			}
+			if err := o.SessionStore.RecordStateChanged(ctx, stateChanged, o.now()); err != nil {
+				_ = conn.Close(websocket.StatusInternalError, "state change store failed")
+				return
+			}
+		case protocol.TypeNodeSafetyEvent:
+			var event protocol.NodeSafetyEventPayload
+			if err := json.Unmarshal(envelope.Payload, &event); err != nil {
+				_ = conn.Close(websocket.StatusPolicyViolation, "invalid safety event payload")
+				return
+			}
+			if event.NodeID != tokenNodeID {
+				_ = conn.Close(websocket.StatusPolicyViolation, "node identity mismatch")
+				return
+			}
+			if err := o.SessionStore.RecordSafetyEvent(ctx, event, o.now()); err != nil {
+				_ = conn.Close(websocket.StatusInternalError, "safety event store failed")
+				return
+			}
 		case protocol.TypeJobAccepted, protocol.TypeJobStarted, protocol.TypeJobRejected, protocol.TypeJobFailed, protocol.TypeJobCompleted:
 			if o.JobService == nil {
 				_ = conn.Close(websocket.StatusUnsupportedData, "job service is not configured")
@@ -387,6 +424,13 @@ func (o Options) now() time.Time {
 		return o.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func (o Options) logger() *slog.Logger {
+	if o.Logger != nil {
+		return o.Logger
+	}
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func heartbeatIntervalSeconds(interval time.Duration) int {

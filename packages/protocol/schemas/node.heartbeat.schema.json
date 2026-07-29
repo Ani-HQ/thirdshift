@@ -33,6 +33,10 @@
               }
             },
             "active_job_id": {"type": ["string", "null"]},
+            "schedule_state": {"type": "string", "enum": ["in_window", "out_of_window"]},
+            "thermal_state": {"type": "string", "enum": ["normal", "warm", "hard_limit"]},
+            "paused": {"type": "boolean"},
+            "draining": {"type": "boolean"},
             "uptime_seconds": {"type": "integer", "minimum": 0},
             "timestamp": {"type": "string", "format": "date-time"}
           }
@@ -41,4 +45,3 @@
     }
   ]
 }
-

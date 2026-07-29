@@ -239,6 +239,10 @@ func nodesList(args []string) error {
 			LastSeenAt      *time.Time `json:"last_seen_at"`
 			SessionStatus   string     `json:"session_status"`
 			LastHeartbeatAt *time.Time `json:"last_heartbeat_at"`
+			ScheduleState   string     `json:"schedule_state"`
+			ThermalState    string     `json:"thermal_state"`
+			Paused          bool       `json:"paused"`
+			Draining        bool       `json:"draining"`
 		} `json:"nodes"`
 	}
 	if err := getAdminJSON(*coordinatorURL+"/internal/v1/nodes", *operatorToken, &resp); err != nil {
@@ -248,7 +252,7 @@ func nodesList(args []string) error {
 		fmt.Fprintln(os.Stdout, "no nodes")
 		return nil
 	}
-	fmt.Fprintln(os.Stdout, "NODE_ID\tSTATE\tSESSION\tLAST_HEARTBEAT_AGE\tMODEL")
+	fmt.Fprintln(os.Stdout, "NODE_ID\tSTATE\tSESSION\tLAST_HEARTBEAT_AGE\tMODEL\tSCHEDULE\tTHERMAL\tPAUSED\tDRAINING")
 	now := time.Now().UTC()
 	for _, node := range resp.Nodes {
 		age := "never"
@@ -259,7 +263,15 @@ func nodesList(args []string) error {
 		if model == "" {
 			model = "-"
 		}
-		fmt.Fprintf(os.Stdout, "%s\t%s\t%s\t%s\t%s\n", node.ID, node.State, node.SessionStatus, age, model)
+		schedule := node.ScheduleState
+		if schedule == "" {
+			schedule = "-"
+		}
+		thermal := node.ThermalState
+		if thermal == "" {
+			thermal = "-"
+		}
+		fmt.Fprintf(os.Stdout, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%t\t%t\n", node.ID, node.State, node.SessionStatus, age, model, schedule, thermal, node.Paused, node.Draining)
 	}
 	return nil
 }

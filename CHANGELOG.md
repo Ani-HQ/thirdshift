@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.4 - 2026-07-29
+
+- Added local host schedule configuration, schedule-aware heartbeats, and scheduler exclusion for out-of-window nodes.
+- Added pause, drain, resume, thermal guard safety events, hard-limit runtime cancellation, and enriched node status/list output.
+- Added exactly-once transient retry on a different eligible node plus structured redacted logging for routed requests.
+- Added migration `000005`, protocol heartbeat fields, M4 integration coverage, and safety/reliability runbook steps.
+
 ## 0.1.0-alpha.3 - 2026-07-29
 
 - Added developer API key bootstrap, catalog sync, `/v1/models`, OpenAI-compatible chat completions, and async job create/get/cancel endpoints.

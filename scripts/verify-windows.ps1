@@ -134,6 +134,35 @@ if ($ok) {
     }
 }
 
+$ok = Run-Check "M4 NVIDIA thermal query" {
+    nvidia-smi --query-gpu=name,temperature.gpu,power.draw,power.limit --format=csv,noheader,nounits
+}
+if (-not $ok) { $failed++ }
+
+if (-not [string]::IsNullOrWhiteSpace($CoordinatorUrl) -and (Test-Path $DataDir)) {
+    $Agent = $null
+    $ok = Run-Check "M4 configure pause resume" {
+        go run ./cmd/thirdshift configure --data-dir $DataDir --from 23:00 --until 08:00 --max-temp 78 --hard-temp 88 --thermal-hysteresis 5
+        $StartArgs = @("run", "./cmd/thirdshift", "start", "--coordinator", $CoordinatorUrl, "--data-dir", $DataDir, "--heartbeat-interval", "5s")
+        if (-not [string]::IsNullOrWhiteSpace($env:THIRDSHIFT_RUNTIME_BASE_URL)) {
+            $StartArgs += @("--runtime-base-url", $env:THIRDSHIFT_RUNTIME_BASE_URL)
+        }
+        $Agent = Start-Process go -ArgumentList $StartArgs -PassThru
+        Start-Sleep -Seconds 15
+        go run ./cmd/thirdshift pause --data-dir $DataDir
+        go run ./cmd/thirdshift status --data-dir $DataDir
+        go run ./cmd/thirdshift resume --data-dir $DataDir
+        go run ./cmd/thirdshift status --data-dir $DataDir
+        if (-not [string]::IsNullOrWhiteSpace($OperatorToken)) {
+            go run ./cmd/admin-cli nodes list --coordinator $CoordinatorUrl --operator-token $OperatorToken
+        }
+    }
+    if (-not $ok) { $failed++ }
+    if ($Agent -ne $null -and -not $Agent.HasExited) {
+        Stop-Process -Id $Agent.Id -Force
+    }
+}
+
 if ($failed -gt 0) {
     Write-Host "$failed check(s) failed."
     exit 1

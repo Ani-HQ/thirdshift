@@ -20,6 +20,7 @@ import (
 	"github.com/anianroid/thirdshift/internal/node/identity"
 	"github.com/anianroid/thirdshift/internal/node/models"
 	noderuntime "github.com/anianroid/thirdshift/internal/node/runtime"
+	nodeschedule "github.com/anianroid/thirdshift/internal/node/schedule"
 	"github.com/anianroid/thirdshift/internal/node/session"
 	nodestate "github.com/anianroid/thirdshift/internal/node/state"
 	"github.com/anianroid/thirdshift/internal/node/telemetry"
@@ -58,6 +59,14 @@ type Options struct {
 	Now               func() time.Time
 	Output            io.Writer
 	PrivateKey        ed25519.PrivateKey
+	ScheduleFrom      string
+	ScheduleUntil     string
+	ScheduleLocation  *time.Location
+	MaxTempC          int
+	HardTempC         int
+	ThermalHysteresis int
+	PauseIdleTimeout  time.Duration
+	ThermalPoll       time.Duration
 }
 
 type Agent struct {
@@ -66,10 +75,17 @@ type Agent struct {
 	state           nodestate.State
 	runtimeStatus   RuntimeStatus
 	gpu             protocol.GPUStatus
+	scheduleWindow  nodeschedule.Window
+	scheduleState   string
+	thermalState    string
 	sessionID       string
 	connected       bool
 	sequence        int64
 	activeJobID     *string
+	activeJobCancel context.CancelFunc
+	pauseRequested  bool
+	pausedAt        *time.Time
+	lastSentState   nodestate.State
 	lastHeartbeatAt *time.Time
 	lastError       string
 	startedAt       time.Time
@@ -88,6 +104,7 @@ func New(opts Options) (*Agent, error) {
 	if opts.DataDir == "" {
 		opts.DataDir = config.DefaultDataDir()
 	}
+	cfg, cfgErr := config.Load(opts.DataDir)
 	if opts.CatalogDir == "" {
 		opts.CatalogDir = "models/catalog"
 	}
@@ -138,19 +155,70 @@ func New(opts Options) (*Agent, error) {
 		}
 		opts.PrivateKey = privateKey
 	}
-	if opts.ModelID == "" {
-		cfg, err := config.Load(opts.DataDir)
-		if err == nil {
+	if cfgErr == nil {
+		if opts.ModelID == "" {
 			opts.ModelID = cfg.ModelID
+		}
+		if opts.CoordinatorURL == "" {
+			opts.CoordinatorURL = cfg.CoordinatorURL
+		}
+		if opts.ScheduleFrom == "" {
+			opts.ScheduleFrom = cfg.ScheduleFrom
+		}
+		if opts.ScheduleUntil == "" {
+			opts.ScheduleUntil = cfg.ScheduleUntil
+		}
+		if opts.MaxTempC == 0 {
+			opts.MaxTempC = cfg.MaxTempC
+		}
+		if opts.HardTempC == 0 {
+			opts.HardTempC = cfg.HardTempC
+		}
+		if opts.ThermalHysteresis == 0 {
+			opts.ThermalHysteresis = cfg.ThermalHysteresis
+		}
+		if opts.PauseIdleTimeout == 0 {
+			opts.PauseIdleTimeout = cfg.PauseIdleTimeout
 		}
 	}
 	if opts.ModelID == "" {
 		opts.ModelID = "thirdshift-tiny-chat-v1"
 	}
+	if opts.ScheduleFrom == "" {
+		opts.ScheduleFrom = "00:00"
+	}
+	if opts.ScheduleUntil == "" {
+		opts.ScheduleUntil = "00:00"
+	}
+	if opts.MaxTempC == 0 {
+		opts.MaxTempC = 78
+	}
+	if opts.HardTempC == 0 {
+		opts.HardTempC = opts.MaxTempC + 10
+	}
+	if opts.HardTempC <= opts.MaxTempC {
+		opts.HardTempC = opts.MaxTempC + 10
+	}
+	if opts.ThermalHysteresis == 0 {
+		opts.ThermalHysteresis = 5
+	}
+	if opts.PauseIdleTimeout == 0 {
+		opts.PauseIdleTimeout = 5 * time.Minute
+	}
+	if opts.ThermalPoll == 0 {
+		opts.ThermalPoll = 10 * time.Second
+	}
+	window, err := nodeschedule.ParseWindow(opts.ScheduleFrom, opts.ScheduleUntil)
+	if err != nil {
+		return nil, err
+	}
 	return &Agent{
-		opts:      opts,
-		state:     nodestate.Offline,
-		startedAt: opts.now(),
+		opts:           opts,
+		state:          nodestate.Offline,
+		scheduleWindow: window,
+		scheduleState:  nodeschedule.StateInWindow,
+		thermalState:   "normal",
+		startedAt:      opts.now(),
 	}, nil
 }
 
@@ -330,7 +398,27 @@ func (a *Agent) sendHeartbeat(ctx context.Context, conn *websocket.Conn) error {
 	if err != nil {
 		gpu = protocol.GPUStatus{Name: "telemetry-unavailable"}
 	}
-	heartbeat := buildHeartbeat(a.opts.NodeID, sequence, state, runtimeStatus, gpu, activeJobID, uptime, a.opts.now())
+	stateChanged, safetyEvent := a.evaluateGuards(gpu, "")
+	if stateChanged != nil {
+		if err := a.writeEnvelope(ctx, conn, protocol.TypeNodeStateChanged, *stateChanged); err != nil {
+			return err
+		}
+	}
+	if safetyEvent != nil {
+		if err := a.writeEnvelope(ctx, conn, protocol.TypeNodeSafetyEvent, *safetyEvent); err != nil {
+			return err
+		}
+	}
+	a.mu.Lock()
+	state = a.state
+	runtimeStatus = a.runtimeStatus
+	activeJobID = cloneStringPtr(a.activeJobID)
+	scheduleState := a.scheduleState
+	thermalState := a.thermalState
+	paused := a.pauseRequested || a.state == nodestate.Paused
+	draining := a.state == nodestate.Draining
+	a.mu.Unlock()
+	heartbeat := buildHeartbeat(a.opts.NodeID, sequence, state, runtimeStatus, gpu, activeJobID, scheduleState, thermalState, paused, draining, uptime, a.opts.now())
 	if err := a.writeEnvelope(ctx, conn, protocol.TypeNodeHeartbeat, heartbeat); err != nil {
 		return err
 	}
@@ -344,10 +432,10 @@ func (a *Agent) sendHeartbeat(ctx context.Context, conn *websocket.Conn) error {
 }
 
 func BuildHeartbeat(nodeID string, sequence int64, state nodestate.State, runtimeStatus RuntimeStatus, gpu protocol.GPUStatus, uptimeSeconds int64, now time.Time) protocol.NodeHeartbeatPayload {
-	return buildHeartbeat(nodeID, sequence, state, runtimeStatus, gpu, nil, uptimeSeconds, now)
+	return buildHeartbeat(nodeID, sequence, state, runtimeStatus, gpu, nil, nodeschedule.StateInWindow, "normal", false, state == nodestate.Draining, uptimeSeconds, now)
 }
 
-func buildHeartbeat(nodeID string, sequence int64, state nodestate.State, runtimeStatus RuntimeStatus, gpu protocol.GPUStatus, activeJobID *string, uptimeSeconds int64, now time.Time) protocol.NodeHeartbeatPayload {
+func buildHeartbeat(nodeID string, sequence int64, state nodestate.State, runtimeStatus RuntimeStatus, gpu protocol.GPUStatus, activeJobID *string, scheduleState, thermalState string, paused, draining bool, uptimeSeconds int64, now time.Time) protocol.NodeHeartbeatPayload {
 	return protocol.NodeHeartbeatPayload{
 		NodeID:        nodeID,
 		Sequence:      sequence,
@@ -357,6 +445,10 @@ func buildHeartbeat(nodeID string, sequence int64, state nodestate.State, runtim
 		ModelHash:     runtimeStatus.ModelHash,
 		GPU:           gpu,
 		ActiveJobID:   activeJobID,
+		ScheduleState: scheduleState,
+		ThermalState:  thermalState,
+		Paused:        paused,
+		Draining:      draining,
 		UptimeSeconds: uptimeSeconds,
 		Timestamp:     now.UTC(),
 	}
@@ -378,6 +470,153 @@ func (a *Agent) writeEnvelope(ctx context.Context, conn *websocket.Conn, typ pro
 	a.writeMu.Lock()
 	defer a.writeMu.Unlock()
 	return conn.Write(ctx, websocket.MessageText, data)
+}
+
+func (a *Agent) evaluateGuards(gpu protocol.GPUStatus, reason string) (*protocol.NodeStateChangedPayload, *protocol.NodeSafetyEventPayload) {
+	now := a.opts.now()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	previousState := a.state
+	previousThermal := a.thermalState
+	if a.scheduleState == "" {
+		a.scheduleState = nodeschedule.StateInWindow
+	}
+	a.scheduleState = a.scheduleWindow.StateAt(now, a.opts.ScheduleLocation)
+	a.thermalState = a.nextThermalStateLocked(gpu.TemperatureC)
+
+	active := a.activeJobID != nil
+	runtimeReady := a.runtimeStatus.ModelID != "" && a.runtimeStatus.ModelHash != "" && a.runtimeStatus.RuntimeHash != "" && a.runtimeStatus.BaseURL != ""
+	switch {
+	case a.pauseRequested && active:
+		a.forceStateLocked(nodestate.Draining)
+	case a.pauseRequested && !active:
+		a.forceStateLocked(nodestate.Paused)
+	case a.thermalState == "hard_limit":
+		if a.activeJobCancel != nil {
+			a.activeJobCancel()
+		}
+		if active || a.state == nodestate.Busy {
+			a.forceStateLocked(nodestate.Draining)
+		} else if a.state == nodestate.Available || a.state == nodestate.Preparing || a.state == nodestate.Draining {
+			a.forceStateLocked(nodestate.Idle)
+		}
+	case a.thermalState == "warm":
+		if active || a.state == nodestate.Busy {
+			a.forceStateLocked(nodestate.Draining)
+		} else if a.state == nodestate.Available || a.state == nodestate.Preparing || a.state == nodestate.Draining {
+			a.forceStateLocked(nodestate.Idle)
+		}
+	case a.scheduleState == nodeschedule.StateOutOfWindow && !active:
+		if a.state == nodestate.Available || a.state == nodestate.Preparing {
+			a.forceStateLocked(nodestate.Idle)
+		}
+	case a.scheduleState == nodeschedule.StateInWindow && a.thermalState == "normal" && !active:
+		if (a.state == nodestate.Idle || a.state == nodestate.Draining) && runtimeReady {
+			a.forceStateLocked(nodestate.Available)
+		}
+	}
+	if a.state == nodestate.Paused && !active && a.pausedAt != nil && a.opts.PauseIdleTimeout > 0 && !now.Before(a.pausedAt.Add(a.opts.PauseIdleTimeout)) {
+		if closer, ok := a.opts.Runtime.(interface{ Close(context.Context) error }); ok && a.runtimeStatus.BaseURL != "" {
+			_ = closer.Close(context.Background())
+			a.runtimeStatus = RuntimeStatus{}
+		}
+	}
+	if a.state != previousState || a.state != a.lastSentState || a.lastSentState == "" {
+		if reason == "" {
+			reason = "guard_update"
+		}
+		from := previousState
+		if a.lastSentState != "" && a.lastSentState != a.state {
+			from = a.lastSentState
+		}
+		a.lastSentState = a.state
+		a.writeStatusLocked()
+		return &protocol.NodeStateChangedPayload{
+			NodeID:        a.opts.NodeID,
+			PreviousState: string(from),
+			State:         string(a.state),
+			Reason:        reason,
+			Timestamp:     now,
+		}, a.safetyEventLocked(previousThermal, gpu, now)
+	}
+	return nil, a.safetyEventLocked(previousThermal, gpu, now)
+}
+
+func (a *Agent) nextThermalStateLocked(tempC int) string {
+	if a.thermalState == "" {
+		a.thermalState = "normal"
+	}
+	if tempC <= 0 || a.opts.MaxTempC <= 0 {
+		return "normal"
+	}
+	recoverAt := a.opts.MaxTempC - a.opts.ThermalHysteresis
+	if recoverAt < 0 {
+		recoverAt = 0
+	}
+	switch a.thermalState {
+	case "warm", "hard_limit":
+		if tempC <= recoverAt {
+			return "normal"
+		}
+		if tempC >= a.opts.HardTempC {
+			return "hard_limit"
+		}
+		return "warm"
+	default:
+		if tempC >= a.opts.HardTempC {
+			return "hard_limit"
+		}
+		if tempC > a.opts.MaxTempC {
+			return "warm"
+		}
+		return "normal"
+	}
+}
+
+func (a *Agent) safetyEventLocked(previousThermal string, gpu protocol.GPUStatus, now time.Time) *protocol.NodeSafetyEventPayload {
+	if a.thermalState == previousThermal || (a.thermalState != "warm" && a.thermalState != "hard_limit") {
+		return nil
+	}
+	severity := "warning"
+	eventCode := "over_temperature"
+	message := "temperature exceeded configured limit"
+	if a.thermalState == "hard_limit" {
+		severity = "critical"
+		eventCode = "thermal_hard_limit"
+		message = "temperature exceeded hard safety limit"
+	}
+	temp := gpu.TemperatureC
+	power := gpu.PowerW
+	return &protocol.NodeSafetyEventPayload{
+		NodeID:       a.opts.NodeID,
+		EventCode:    eventCode,
+		Severity:     severity,
+		Message:      message,
+		TemperatureC: &temp,
+		PowerW:       &power,
+		OccurredAt:   now,
+	}
+}
+
+func (a *Agent) forceStateLocked(to nodestate.State) {
+	if a.state == to {
+		return
+	}
+	if nodestate.CanTransition(a.state, to) {
+		a.state = to
+		return
+	}
+	switch to {
+	case nodestate.Paused:
+		a.state = nodestate.Paused
+	case nodestate.Draining:
+		a.state = nodestate.Draining
+	case nodestate.Idle:
+		a.state = nodestate.Idle
+	case nodestate.Available:
+		a.state = nodestate.Available
+	}
 }
 
 func (a *Agent) handleJobOffer(ctx context.Context, conn *websocket.Conn, offer protocol.JobOfferPayload) error {
@@ -415,8 +654,15 @@ func (a *Agent) handleJobOffer(ctx context.Context, conn *websocket.Conn, offer 
 	var cancel context.CancelFunc
 	if !offer.DeadlineAt.IsZero() {
 		jobCtx, cancel = context.WithDeadline(ctx, offer.DeadlineAt)
-		defer cancel()
+	} else {
+		jobCtx, cancel = context.WithCancel(ctx)
 	}
+	a.setActiveJobCancel(cancel)
+	defer func() {
+		cancel()
+		a.setActiveJobCancel(nil)
+	}()
+	safetyCh := a.monitorJobThermal(jobCtx, conn, cancel)
 	start := a.opts.now()
 	completion, err := noderuntime.ChatCompletion(jobCtx, runtimeStatus.BaseURL, noderuntime.CompletionRequest{
 		Model:       offer.ModelID,
@@ -426,6 +672,26 @@ func (a *Agent) handleJobOffer(ctx context.Context, conn *websocket.Conn, offer 
 		Stream:      false,
 	})
 	if err != nil {
+		if safetyReason := readSafetyReason(safetyCh); safetyReason != "" {
+			return a.writeEnvelope(ctx, conn, protocol.TypeJobFailed, protocol.JobFailedPayload{
+				JobID:     offer.JobID,
+				AttemptID: offer.AttemptID,
+				ErrorCode: "safety_limit",
+				Message:   safetyReason,
+				Retryable: true,
+				FailedAt:  a.opts.now(),
+			})
+		}
+		if a.isHardThermalBlocked() {
+			return a.writeEnvelope(ctx, conn, protocol.TypeJobFailed, protocol.JobFailedPayload{
+				JobID:     offer.JobID,
+				AttemptID: offer.AttemptID,
+				ErrorCode: "safety_limit",
+				Message:   "temperature exceeded hard safety limit",
+				Retryable: true,
+				FailedAt:  a.opts.now(),
+			})
+		}
 		return a.writeEnvelope(ctx, conn, protocol.TypeJobFailed, protocol.JobFailedPayload{
 			JobID:     offer.JobID,
 			AttemptID: offer.AttemptID,
@@ -496,6 +762,15 @@ func (a *Agent) claimJob(offer protocol.JobOfferPayload) (RuntimeStatus, string)
 	if a.state != nodestate.Available {
 		return RuntimeStatus{}, "node is not available"
 	}
+	if a.pauseRequested {
+		return RuntimeStatus{}, "node is paused or draining"
+	}
+	if a.scheduleState == nodeschedule.StateOutOfWindow {
+		return RuntimeStatus{}, "node is outside its configured work window"
+	}
+	if a.thermalState != "" && a.thermalState != "normal" {
+		return RuntimeStatus{}, "node is thermally blocked"
+	}
 	runtimeStatus := a.runtimeStatus
 	if runtimeStatus.ModelID != offer.ModelID {
 		return RuntimeStatus{}, "requested model is not loaded"
@@ -521,10 +796,85 @@ func (a *Agent) releaseJob() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.activeJobID = nil
-	if a.state == nodestate.Busy {
-		a.state = nodestate.Available
+	a.activeJobCancel = nil
+	if a.pauseRequested {
+		now := a.opts.now()
+		a.pausedAt = &now
+		a.forceStateLocked(nodestate.Paused)
+	} else if a.scheduleState == nodeschedule.StateOutOfWindow || (a.thermalState != "" && a.thermalState != "normal") {
+		a.forceStateLocked(nodestate.Idle)
+	} else if a.state == nodestate.Busy || a.state == nodestate.Draining {
+		a.forceStateLocked(nodestate.Available)
 	}
 	a.writeStatusLocked()
+}
+
+func (a *Agent) setActiveJobCancel(cancel context.CancelFunc) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.activeJobCancel = cancel
+}
+
+func (a *Agent) monitorJobThermal(ctx context.Context, conn *websocket.Conn, cancel context.CancelFunc) <-chan string {
+	ch := make(chan string, 1)
+	poll := a.opts.ThermalPoll
+	if poll <= 0 {
+		poll = 10 * time.Second
+	}
+	go func() {
+		ticker := time.NewTicker(poll)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				gpu, err := a.opts.Telemetry.GPUStatus(ctx)
+				if err != nil || gpu.TemperatureC <= 0 || gpu.TemperatureC < a.opts.HardTempC {
+					continue
+				}
+				a.mu.Lock()
+				a.thermalState = "hard_limit"
+				a.forceStateLocked(nodestate.Draining)
+				a.writeStatusLocked()
+				a.mu.Unlock()
+				temp := gpu.TemperatureC
+				power := gpu.PowerW
+				event := protocol.NodeSafetyEventPayload{
+					NodeID:       a.opts.NodeID,
+					EventCode:    "thermal_hard_limit",
+					Severity:     "critical",
+					Message:      "temperature exceeded hard safety limit",
+					TemperatureC: &temp,
+					PowerW:       &power,
+					OccurredAt:   a.opts.now(),
+				}
+				_ = a.writeEnvelope(context.Background(), conn, protocol.TypeNodeSafetyEvent, event)
+				select {
+				case ch <- event.Message:
+				default:
+				}
+				cancel()
+				return
+			}
+		}
+	}()
+	return ch
+}
+
+func readSafetyReason(ch <-chan string) string {
+	select {
+	case reason := <-ch:
+		return reason
+	default:
+		return ""
+	}
+}
+
+func (a *Agent) isHardThermalBlocked() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.thermalState == "hard_limit"
 }
 
 func validateOfferRequest(req protocol.ChatRequest) error {
@@ -583,15 +933,26 @@ func maxInt64(a, b int64) int64 {
 func (a *Agent) handleControl(command control.Command) control.Response {
 	switch command.Action {
 	case "pause":
-		if err := a.transition(nodestate.Paused); err != nil {
-			return control.Response{Error: err.Error()}
+		a.mu.Lock()
+		a.pauseRequested = true
+		now := a.opts.now()
+		target := nodestate.Paused
+		if a.activeJobID != nil {
+			target = nodestate.Draining
+		} else {
+			a.pausedAt = &now
 		}
+		if err := nodestate.Transition(a.state, target); err != nil {
+			a.forceStateLocked(target)
+		} else {
+			a.state = target
+		}
+		a.writeStatusLocked()
+		a.mu.Unlock()
 		return control.Response{Status: a.status()}
 	case "resume":
-		if err := a.transition(nodestate.Available); err != nil {
-			if retryErr := a.transition(nodestate.Idle); retryErr != nil {
-				return control.Response{Error: err.Error()}
-			}
+		if err := a.resume(context.Background()); err != nil {
+			return control.Response{Error: err.Error()}
 		}
 		return control.Response{Status: a.status()}
 	case "status":
@@ -599,6 +960,39 @@ func (a *Agent) handleControl(command control.Command) control.Response {
 	default:
 		return control.Response{Error: "unknown control command"}
 	}
+}
+
+func (a *Agent) resume(ctx context.Context) error {
+	a.mu.Lock()
+	a.pauseRequested = false
+	a.pausedAt = nil
+	needsPrepare := a.runtimeStatus.ModelID == "" || a.runtimeStatus.BaseURL == ""
+	if a.activeJobID != nil {
+		a.mu.Unlock()
+		return nil
+	}
+	if needsPrepare {
+		a.forceStateLocked(nodestate.Preparing)
+		a.writeStatusLocked()
+		a.mu.Unlock()
+		status, err := a.opts.Runtime.Prepare(ctx, a.opts.ModelID)
+		if err != nil {
+			_ = a.transition(nodestate.Error)
+			return err
+		}
+		a.setRuntime(status)
+	} else {
+		a.mu.Unlock()
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.scheduleState == nodeschedule.StateOutOfWindow || a.thermalState != "normal" {
+		a.forceStateLocked(nodestate.Idle)
+	} else {
+		a.forceStateLocked(nodestate.Available)
+	}
+	a.writeStatusLocked()
+	return nil
 }
 
 func (a *Agent) transition(to nodestate.State) error {
@@ -673,7 +1067,11 @@ func (a *Agent) statusLocked() *control.Status {
 		ModelID:           a.runtimeStatus.ModelID,
 		RuntimeHash:       a.runtimeStatus.RuntimeHash,
 		ModelHash:         a.runtimeStatus.ModelHash,
-		Schedule:          "placeholder",
+		Schedule:          a.scheduleWindow.String(),
+		ScheduleState:     a.scheduleState,
+		ThermalState:      a.thermalState,
+		Paused:            a.pauseRequested || a.state == nodestate.Paused,
+		Draining:          a.state == nodestate.Draining,
 		TemperatureC:      temp,
 		PowerW:            power,
 		SessionConnected:  a.connected,

@@ -163,3 +163,9 @@ type ScheduledAttempt struct {
 	ModelHash      string
 	RuntimeHash    string
 }
+
+type ExpiredAttempt struct {
+	JobID     string
+	AttemptID string
+	NodeID    string
+}

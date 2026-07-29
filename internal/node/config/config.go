@@ -14,6 +14,12 @@ const (
 	envDataDir        = "THIRDSHIFT_NODE_DATA_DIR"
 	envCoordinatorURL = "THIRDSHIFT_COORDINATOR_URL"
 	envModelID        = "THIRDSHIFT_MODEL_ID"
+	envScheduleFrom   = "THIRDSHIFT_SCHEDULE_FROM"
+	envScheduleUntil  = "THIRDSHIFT_SCHEDULE_UNTIL"
+	envMaxTempC       = "THIRDSHIFT_MAX_TEMP_C"
+	envHardTempC      = "THIRDSHIFT_HARD_TEMP_C"
+	envHysteresisC    = "THIRDSHIFT_THERMAL_HYSTERESIS_C"
+	envPauseIdleSec   = "THIRDSHIFT_PAUSE_IDLE_TIMEOUT_SECONDS"
 )
 
 type Config struct {
@@ -21,6 +27,12 @@ type Config struct {
 	CoordinatorURL    string
 	ModelID           string
 	HeartbeatInterval time.Duration
+	ScheduleFrom      string
+	ScheduleUntil     string
+	MaxTempC          int
+	HardTempC         int
+	ThermalHysteresis int
+	PauseIdleTimeout  time.Duration
 }
 
 func DefaultDataDir() string {
@@ -36,6 +48,12 @@ func Load(dataDir string) (Config, error) {
 		DataDir:           dataDir,
 		ModelID:           "thirdshift-tiny-chat-v1",
 		HeartbeatInterval: 15 * time.Second,
+		ScheduleFrom:      "00:00",
+		ScheduleUntil:     "00:00",
+		MaxTempC:          78,
+		HardTempC:         88,
+		ThermalHysteresis: 5,
+		PauseIdleTimeout:  5 * time.Minute,
 	}
 	if cfg.DataDir == "" {
 		cfg.DataDir = DefaultDataDir()
@@ -59,14 +77,41 @@ func Save(cfg Config) error {
 	if cfg.HeartbeatInterval <= 0 {
 		cfg.HeartbeatInterval = 15 * time.Second
 	}
+	if cfg.ScheduleFrom == "" {
+		cfg.ScheduleFrom = "00:00"
+	}
+	if cfg.ScheduleUntil == "" {
+		cfg.ScheduleUntil = "00:00"
+	}
+	if cfg.MaxTempC <= 0 {
+		cfg.MaxTempC = 78
+	}
+	if cfg.HardTempC <= 0 {
+		cfg.HardTempC = cfg.MaxTempC + 10
+	}
+	if cfg.HardTempC <= cfg.MaxTempC {
+		cfg.HardTempC = cfg.MaxTempC + 10
+	}
+	if cfg.ThermalHysteresis <= 0 {
+		cfg.ThermalHysteresis = 5
+	}
+	if cfg.PauseIdleTimeout <= 0 {
+		cfg.PauseIdleTimeout = 5 * time.Minute
+	}
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return fmt.Errorf("create node data dir: %w", err)
 	}
 	path := filepath.Join(cfg.DataDir, "config.toml")
-	body := fmt.Sprintf("coordinator_url = %q\nmodel_id = %q\nheartbeat_interval_seconds = %d\n",
+	body := fmt.Sprintf("coordinator_url = %q\nmodel_id = %q\nheartbeat_interval_seconds = %d\nschedule_from = %q\nschedule_until = %q\nmax_temp_c = %d\nhard_temp_c = %d\nthermal_hysteresis_c = %d\npause_idle_timeout_seconds = %d\n",
 		cfg.CoordinatorURL,
 		cfg.ModelID,
 		int(cfg.HeartbeatInterval.Seconds()),
+		cfg.ScheduleFrom,
+		cfg.ScheduleUntil,
+		cfg.MaxTempC,
+		cfg.HardTempC,
+		cfg.ThermalHysteresis,
+		int(cfg.PauseIdleTimeout.Seconds()),
 	)
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		return fmt.Errorf("write config file: %w", err)
@@ -103,6 +148,34 @@ func parseFile(path string, cfg *Config) error {
 				return fmt.Errorf("%s:%d: heartbeat_interval_seconds must be an integer", path, lineNo)
 			}
 			cfg.HeartbeatInterval = time.Duration(seconds) * time.Second
+		case "schedule_from":
+			cfg.ScheduleFrom = value
+		case "schedule_until":
+			cfg.ScheduleUntil = value
+		case "max_temp_c":
+			parsed, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("%s:%d: max_temp_c must be an integer", path, lineNo)
+			}
+			cfg.MaxTempC = parsed
+		case "hard_temp_c":
+			parsed, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("%s:%d: hard_temp_c must be an integer", path, lineNo)
+			}
+			cfg.HardTempC = parsed
+		case "thermal_hysteresis_c":
+			parsed, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("%s:%d: thermal_hysteresis_c must be an integer", path, lineNo)
+			}
+			cfg.ThermalHysteresis = parsed
+		case "pause_idle_timeout_seconds":
+			seconds, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("%s:%d: pause_idle_timeout_seconds must be an integer", path, lineNo)
+			}
+			cfg.PauseIdleTimeout = time.Duration(seconds) * time.Second
 		default:
 			return fmt.Errorf("%s:%d: unknown config key %q", path, lineNo, key)
 		}
@@ -122,5 +195,31 @@ func applyEnv(cfg *Config) {
 	}
 	if value := os.Getenv(envModelID); value != "" {
 		cfg.ModelID = value
+	}
+	if value := os.Getenv(envScheduleFrom); value != "" {
+		cfg.ScheduleFrom = value
+	}
+	if value := os.Getenv(envScheduleUntil); value != "" {
+		cfg.ScheduleUntil = value
+	}
+	if value := os.Getenv(envMaxTempC); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			cfg.MaxTempC = parsed
+		}
+	}
+	if value := os.Getenv(envHardTempC); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			cfg.HardTempC = parsed
+		}
+	}
+	if value := os.Getenv(envHysteresisC); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			cfg.ThermalHysteresis = parsed
+		}
+	}
+	if value := os.Getenv(envPauseIdleSec); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			cfg.PauseIdleTimeout = time.Duration(parsed) * time.Second
+		}
 	}
 }

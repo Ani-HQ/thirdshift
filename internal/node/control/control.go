@@ -20,6 +20,10 @@ type Status struct {
 	RuntimeHash       string     `json:"runtime_hash"`
 	ModelHash         string     `json:"model_hash"`
 	Schedule          string     `json:"schedule"`
+	ScheduleState     string     `json:"schedule_state"`
+	ThermalState      string     `json:"thermal_state"`
+	Paused            bool       `json:"paused"`
+	Draining          bool       `json:"draining"`
 	TemperatureC      *int       `json:"temperature_c,omitempty"`
 	PowerW            *int       `json:"power_w,omitempty"`
 	SessionConnected  bool       `json:"session_connected"`
