@@ -1,0 +1,25 @@
+# Binaries and build output
+/bin/
+/dist/
+*.exe
+*.test
+
+# Go
+/vendor/
+
+# Env and secrets
+.env
+.env.*
+!deploy/env.example
+
+# Model and runtime caches
+*.gguf
+*.partial
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
