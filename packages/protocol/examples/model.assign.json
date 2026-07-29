@@ -1,0 +1,15 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M00000000000000000000E",
+  "type": "model.assign",
+  "sent_at": "2026-07-29T08:00:00Z",
+  "payload": {
+    "assignment_id": "assign_01J0M000000000000000000000",
+    "model_id": "thirdshift-small-chat-v1",
+    "version_id": "mv_01J0M000000000000000000000",
+    "manifest_url": "https://models.thirdshift.example/catalog/thirdshift-small-chat-v1.yaml",
+    "manifest_hash": "sha256:abcdef0000000000000000000000000000000000000000000000000000000000",
+    "assigned_at": "2026-07-29T08:00:00Z"
+  }
+}
+

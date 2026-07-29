@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift session.accepted message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "session.accepted"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node_id", "session_id", "heartbeat_interval_seconds", "accepted_at"],
+          "properties": {
+            "node_id": {"type": "string"},
+            "session_id": {"type": "string"},
+            "heartbeat_interval_seconds": {"type": "integer", "minimum": 1},
+            "accepted_at": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

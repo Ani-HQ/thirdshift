@@ -1,0 +1,14 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M000000000000000000000",
+  "type": "node.hello",
+  "sent_at": "2026-07-29T08:00:00Z",
+  "payload": {
+    "node_id": "node_01J0M000000000000000000000",
+    "agent_version": "0.1.0-alpha.0",
+    "supported_protocol_versions": ["1.0"],
+    "capabilities": ["chat_completions"],
+    "hostname": "host-01"
+  }
+}
+

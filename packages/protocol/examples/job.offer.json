@@ -1,0 +1,30 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M00000000000000000000G",
+  "type": "job.offer",
+  "sent_at": "2026-07-29T08:00:00Z",
+  "payload": {
+    "job_id": "job_01J0M000000000000000000000",
+    "attempt_id": "att_01J0M000000000000000000000",
+    "lease_expires_at": "2026-07-29T08:00:10Z",
+    "deadline_at": "2026-07-29T08:02:00Z",
+    "model_id": "thirdshift-small-chat-v1",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "Summarize this public text."
+        }
+      ],
+      "temperature": 0.2,
+      "max_tokens": 512,
+      "seed": 42,
+      "stream": false
+    },
+    "verification": {
+      "kind": "standard",
+      "challenge_id": null
+    }
+  }
+}
+

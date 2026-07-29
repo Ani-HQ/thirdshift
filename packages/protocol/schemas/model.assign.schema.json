@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift model.assign message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "model.assign"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["assignment_id", "model_id", "version_id", "manifest_url", "manifest_hash", "assigned_at"],
+          "properties": {
+            "assignment_id": {"type": "string"},
+            "model_id": {"type": "string"},
+            "version_id": {"type": "string"},
+            "manifest_url": {"type": "string", "format": "uri"},
+            "manifest_hash": {"type": "string", "pattern": "^sha256:.+"},
+            "assigned_at": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

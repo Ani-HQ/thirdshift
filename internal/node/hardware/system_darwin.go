@@ -1,0 +1,26 @@
+//go:build darwin
+
+package hardware
+
+import (
+	"os/exec"
+	"strconv"
+	"strings"
+	"syscall"
+)
+
+func totalMemoryBytes() (uint64, error) {
+	output, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseUint(strings.TrimSpace(string(output)), 10, 64)
+}
+
+func freeDiskBytes(path string) (uint64, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return 0, err
+	}
+	return stat.Bavail * uint64(stat.Bsize), nil
+}

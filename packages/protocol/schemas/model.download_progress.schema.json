@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift model.download_progress message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "model.download_progress"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node_id", "model_id", "artifact_id", "bytes_downloaded", "bytes_total", "percent", "timestamp"],
+          "properties": {
+            "node_id": {"type": "string"},
+            "model_id": {"type": "string"},
+            "artifact_id": {"type": "string"},
+            "bytes_downloaded": {"type": "integer", "minimum": 0},
+            "bytes_total": {"type": "integer", "minimum": 1},
+            "percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "timestamp": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

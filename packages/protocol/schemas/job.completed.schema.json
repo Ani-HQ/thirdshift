@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift job.completed message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "job.completed"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["job_id", "attempt_id", "model_id", "runtime_hash", "model_hash", "usage", "duration_millis", "finish_reason", "completed_at"],
+          "properties": {
+            "job_id": {"type": "string"},
+            "attempt_id": {"type": "string"},
+            "model_id": {"type": "string"},
+            "runtime_hash": {"type": "string", "pattern": "^sha256:.+"},
+            "model_hash": {"type": "string", "pattern": "^sha256:.+"},
+            "message": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["role", "content"],
+              "properties": {
+                "role": {"type": "string"},
+                "content": {"type": "string"}
+              }
+            },
+            "usage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["prompt_tokens", "completion_tokens", "total_tokens"],
+              "properties": {
+                "prompt_tokens": {"type": "integer", "minimum": 0},
+                "completion_tokens": {"type": "integer", "minimum": 0},
+                "total_tokens": {"type": "integer", "minimum": 0}
+              }
+            },
+            "duration_millis": {"type": "integer", "minimum": 0},
+            "finish_reason": {"type": "string"},
+            "completed_at": {"type": "string", "format": "date-time"},
+            "signature": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key_id", "algorithm", "value", "signed_at"],
+              "properties": {
+                "key_id": {"type": "string"},
+                "algorithm": {"const": "ed25519"},
+                "value": {"type": "string"},
+                "signed_at": {"type": "string", "format": "date-time"}
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

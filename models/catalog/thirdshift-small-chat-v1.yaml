@@ -1,0 +1,55 @@
+schema_version: 1
+model_id: thirdshift-small-chat-v1
+display_name: Thirdshift Small Chat v1
+status: alpha
+source:
+  provider: huggingface
+  repository: approved-org/approved-model-gguf
+  revision: 0123456789abcdef
+  file: approved-model-q4_k_m.gguf
+  sha256: 6b2f000000000000000000000000000000000000000000000000000000000000
+license:
+  identifier: apache-2.0
+  reviewed_at: 2026-07-29
+  notes: Commercial hosted inference permitted after operator review.
+runtime:
+  engine: llama.cpp
+  build_id: llama-cpp-thirdshift-2026-07-01
+  binary_sha256: 91aa000000000000000000000000000000000000000000000000000000000000
+  arguments:
+    context_size: 8192
+    batch_size: 512
+    gpu_layers: auto
+    parallel: 1
+    host: 127.0.0.1
+    port: dynamic
+hardware:
+  min_vram_mb: 8192
+  min_ram_mb: 16384
+  min_disk_mb: 12000
+  eligible_gpu_classes:
+    - ts-nvidia-8gb-v1
+    - ts-nvidia-12gb-v1
+limits:
+  max_input_tokens: 4096
+  max_output_tokens: 1024
+  max_request_bytes: 262144
+capabilities:
+  chat_completions: true
+  streaming: false
+  tools: false
+  embeddings: false
+policy:
+  data_class: public_or_non_sensitive
+  content_filter_profile: alpha-default
+pricing:
+  customer_input_per_million_usd: 0.20
+  customer_output_per_million_usd: 0.60
+  host_credit_per_million_accepted_output_usd: 0.30
+verification:
+  duplicate_sample_rate: 0.02
+  challenge_rate: 0.01
+signature:
+  key_id: catalog-key-2026-01
+  value: base64-signature-placeholder
+

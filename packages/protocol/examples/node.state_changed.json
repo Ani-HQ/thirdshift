@@ -1,0 +1,14 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M000000000000000000002",
+  "type": "node.state_changed",
+  "sent_at": "2026-07-29T08:00:00Z",
+  "payload": {
+    "node_id": "node_01J0M000000000000000000000",
+    "previous_state": "PREPARING_MODEL",
+    "state": "AVAILABLE",
+    "reason": "model_ready",
+    "timestamp": "2026-07-29T08:00:00Z"
+  }
+}
+

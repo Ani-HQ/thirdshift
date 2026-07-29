@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift node.log_event message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "node.log_event"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node_id", "level", "message", "logged_at"],
+          "properties": {
+            "node_id": {"type": "string"},
+            "level": {"type": "string", "enum": ["debug", "info", "warn", "error"]},
+            "message": {"type": "string"},
+            "fields": {
+              "type": "object",
+              "additionalProperties": {"type": "string"}
+            },
+            "logged_at": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+
