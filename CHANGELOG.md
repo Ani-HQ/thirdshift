@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.3 - 2026-07-29
+
+- Added developer API key bootstrap, catalog sync, `/v1/models`, OpenAI-compatible chat completions, and async job create/get/cancel endpoints.
+- Added scheduler eligibility, configurable scoring weights, leases, node-side job execution, signed results, idempotent response replay, and integration coverage for routed fake-runtime completions.
+- Added migrations for API key model permissions, manifest limits, scheduler indexes, and CPU-compatible model hardware profiles.
+
 ## 0.1.0-alpha.2 - 2026-07-29
 
 - Added invite-based node registration, local Ed25519 key storage, bootstrap exchange, and signed access-token refresh.

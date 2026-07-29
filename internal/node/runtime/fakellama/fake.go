@@ -41,7 +41,7 @@ func Main(args []string) int {
 	})
 	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		fmt.Fprintf(os.Stdout, "request body: %s\n", string(body))
+		fmt.Fprintln(os.Stdout, "request body: [REDACTED]")
 		var request struct {
 			Model    string `json:"model"`
 			Messages []struct {

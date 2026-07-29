@@ -63,3 +63,21 @@ The persistent node session uses `GET /v1/node/session` with `Authorization: Bea
 After `session.accepted`, the node sends `node.heartbeat` every 15 seconds by default. The coordinator validates each envelope against `packages/protocol/schemas`, inserts a `node_heartbeats` row, updates `node_sessions.last_heartbeat_at`, and updates `nodes.state` plus `nodes.last_seen_at`.
 
 A coordinator sweeper marks a connected session stale after 45 seconds without a valid heartbeat. Stale or closed sessions make the scheduler-visible node state `OFFLINE`. The node reconnect loop uses exponential backoff with jitter and keeps one outbound WebSocket session active.
+
+## Job Lifecycle
+
+The coordinator creates a `job_attempts` row before sending `job.offer`. The offer is a lease with a default 10 second expiry; the node must accept or reject promptly and the coordinator records `job.accepted` before `job.started`.
+
+For Milestone 3, the node executes one job at a time. It rejects an offer if the lease is expired, the node is not `AVAILABLE`, the requested model is not loaded, model/runtime hashes are unavailable, or the local runtime is not reachable on loopback.
+
+Successful execution returns `job.completed` with assistant message content, usage, duration, finish reason, model hash, runtime hash, and a `signature` object. The Ed25519 signature is computed over the `job.completed` payload with `signature` omitted. The coordinator verifies the active node public key and the expected model/runtime hashes before persisting `job_results` and marking the job `succeeded`.
+
+Failed execution returns `job.failed` with a stable node-side error code and retryability flag. Rejected offers return `job.rejected`. In Milestone 3, a failed or rejected attempt fails the job; retry-on-another-node is deferred.
+
+All job lifecycle envelopes are validated against `packages/protocol/schemas` before send and after receive.
+
+## Public API
+
+Developer requests use `Authorization: Bearer <api-key>` on `/v1/models`, `/v1/chat/completions`, and `/v1/jobs`. API keys are created through operator-authenticated internal endpoints and are stored only as hashes.
+
+`POST /v1/chat/completions` accepts the P0 text-only, non-streaming subset. `stream=true`, tools/function calling, images/files, unknown fields, unknown models, and manifest limit violations are rejected with the §15.5 error shape. Successful responses use an OpenAI-compatible `chat.completion` body with Thirdshift metadata under `thirdshift`.

@@ -14,6 +14,7 @@ import (
 	"github.com/anianroid/thirdshift/internal/coordinator/auth"
 	"github.com/anianroid/thirdshift/internal/coordinator/config"
 	"github.com/anianroid/thirdshift/internal/coordinator/httpapi"
+	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
 	"github.com/anianroid/thirdshift/internal/coordinator/registration"
 	"github.com/anianroid/thirdshift/internal/coordinator/sessions"
 	"github.com/anianroid/thirdshift/internal/shared/protocol"
@@ -50,6 +51,15 @@ func run() error {
 			return fmt.Errorf("database configured via %s but did not respond to ping: %w; verify the database URL and that PostgreSQL is accepting connections", cfg.DatabaseURLSource, err)
 		}
 		store := registration.PGStore{Pool: pool}
+		jobStore := jobs.PGStore{Pool: pool}
+		jobService := &jobs.Service{
+			Store:       jobStore,
+			Scheduler:   jobs.Scheduler{Weights: cfg.SchedulerWeights},
+			RateLimiter: &jobs.RateLimiter{LimitPerMinute: 60},
+			StaleAfter:  cfg.SessionStaleAfter,
+			LeaseTTL:    10 * time.Second,
+			SyncTimeout: 120 * time.Second,
+		}
 		validator, err := protocolValidator()
 		if err != nil {
 			return err
@@ -62,6 +72,8 @@ func run() error {
 			SessionStore:      store,
 			TokenSigner:       auth.TokenSigner{Secret: []byte(cfg.AccessTokenSecret), TTL: time.Hour},
 			ProtocolValidator: validator,
+			JobService:        jobService,
+			CatalogDir:        "models/catalog",
 			OperatorToken:     cfg.OperatorToken,
 			HeartbeatInterval: cfg.HeartbeatInterval,
 		})

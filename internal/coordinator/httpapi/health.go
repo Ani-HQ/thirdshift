@@ -8,9 +8,11 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anianroid/thirdshift/internal/coordinator/auth"
+	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
 	"github.com/anianroid/thirdshift/internal/coordinator/registration"
 	nodestate "github.com/anianroid/thirdshift/internal/node/state"
 	"github.com/anianroid/thirdshift/internal/shared/ids"
@@ -30,6 +32,8 @@ type Options struct {
 	SessionStore      SessionStore
 	TokenSigner       auth.TokenSigner
 	ProtocolValidator *protocol.Validator
+	JobService        *jobs.Service
+	CatalogDir        string
 	OperatorToken     string
 	HeartbeatInterval time.Duration
 	Now               func() time.Time
@@ -66,11 +70,22 @@ func NewMuxWithOptions(opts Options) http.Handler {
 	if opts.ProtocolValidator == nil {
 		opts.ProtocolValidator, _ = protocol.NewValidator("")
 	}
+	if opts.JobService != nil && opts.JobService.RateLimiter == nil {
+		opts.JobService.RateLimiter = &jobs.RateLimiter{LimitPerMinute: 60, Now: opts.now}
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler(opts.Version))
+	mux.HandleFunc("POST /internal/v1/orgs", opts.operatorOnly(opts.createOrgHandler()))
+	mux.HandleFunc("POST /internal/v1/api-keys", opts.operatorOnly(opts.createAPIKeyHandler()))
+	mux.HandleFunc("POST /internal/v1/catalog/sync", opts.operatorOnly(opts.catalogSyncHandler()))
 	mux.HandleFunc("POST /internal/v1/invites", opts.operatorOnly(opts.createInviteHandler()))
 	mux.HandleFunc("GET /internal/v1/nodes", opts.operatorOnly(opts.nodesListHandler()))
+	mux.HandleFunc("GET /v1/models", opts.developerOnly(opts.modelsHandler()))
+	mux.HandleFunc("POST /v1/chat/completions", opts.developerOnly(opts.chatCompletionsHandler()))
+	mux.HandleFunc("POST /v1/jobs", opts.developerOnly(opts.createJobHandler()))
+	mux.HandleFunc("GET /v1/jobs/{job_id}", opts.developerOnly(opts.getJobHandler()))
+	mux.HandleFunc("POST /v1/jobs/{job_id}/cancel", opts.developerOnly(opts.cancelJobHandler()))
 	mux.HandleFunc("POST /v1/node/register", opts.registerNodeHandler())
 	mux.HandleFunc("POST /v1/node/token", opts.exchangeBootstrapHandler())
 	mux.HandleFunc("POST /v1/node/token/refresh", opts.refreshTokenHandler())
@@ -282,6 +297,15 @@ func (o Options) handleSession(ctx context.Context, conn *websocket.Conn, tokenN
 	}); err != nil {
 		return
 	}
+	var writeMu sync.Mutex
+	if o.JobService != nil {
+		detach := o.JobService.AttachSession(tokenNodeID, sessionID, func(ctx context.Context, typ protocol.MessageType, payload any) error {
+			writeMu.Lock()
+			defer writeMu.Unlock()
+			return o.writeEnvelope(ctx, conn, typ, payload)
+		})
+		defer detach()
+	}
 
 	for {
 		_, data, err := conn.Read(ctx)
@@ -312,8 +336,17 @@ func (o Options) handleSession(ctx context.Context, conn *websocket.Conn, tokenN
 				_ = conn.Close(websocket.StatusInternalError, "heartbeat store failed")
 				return
 			}
+		case protocol.TypeJobAccepted, protocol.TypeJobStarted, protocol.TypeJobRejected, protocol.TypeJobFailed, protocol.TypeJobCompleted:
+			if o.JobService == nil {
+				_ = conn.Close(websocket.StatusUnsupportedData, "job service is not configured")
+				return
+			}
+			if err := o.JobService.HandleNodeMessage(ctx, tokenNodeID, sessionID, envelope); err != nil {
+				_ = conn.Close(websocket.StatusInternalError, "job message handling failed")
+				return
+			}
 		default:
-			_ = conn.Close(websocket.StatusUnsupportedData, "unsupported message type in M2")
+			_ = conn.Close(websocket.StatusUnsupportedData, "unsupported message type")
 			return
 		}
 	}

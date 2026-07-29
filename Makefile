@@ -1,7 +1,7 @@
 GO ?= go
 MIGRATIONS_DIR ?= migrations
 
-.PHONY: build test lint migrate dev test-slice test-integration build-windows doctor-json run-local coordinator invite nodes start status
+.PHONY: build test lint migrate dev test-slice test-integration build-windows doctor-json run-local coordinator org catalog-sync apikey fake-runtime chat-demo invite nodes start status
 
 build:
 	$(GO) build ./...
@@ -36,6 +36,21 @@ run-local:
 
 coordinator:
 	$(GO) run ./cmd/coordinator
+
+org:
+	$(GO) run ./cmd/admin-cli org create --name "$${ORG_NAME:-Thirdshift Dev}"
+
+catalog-sync:
+	$(GO) run ./cmd/admin-cli catalog sync
+
+apikey:
+	$(GO) run ./cmd/admin-cli apikey create --org "$${ORG_ID:?set ORG_ID}" --model "$${MODEL_ID:-thirdshift-tiny-chat-v1}"
+
+fake-runtime:
+	$(GO) run ./tests/fixtures/fake-llama-server --host 127.0.0.1 --port "$${FAKE_RUNTIME_PORT:-18081}" --model fake.gguf
+
+chat-demo:
+	curl -sS "$${THIRDSHIFT_COORDINATOR_URL:-http://127.0.0.1:8080}/v1/chat/completions" -H "Authorization: Bearer $${THIRDSHIFT_API_KEY:?set THIRDSHIFT_API_KEY}" -H "Content-Type: application/json" -H "Idempotency-Key: demo-001" -d '{"model":"thirdshift-tiny-chat-v1","messages":[{"role":"user","content":"Write one Thirdshift demo sentence."}],"temperature":0.2,"max_tokens":32,"stream":false}'
 
 invite:
 	$(GO) run ./cmd/admin-cli invite create --fleet "$${FLEET_ID:?set FLEET_ID}"

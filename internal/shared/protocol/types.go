@@ -205,15 +205,24 @@ type Usage struct {
 }
 
 type JobCompletedPayload struct {
-	JobID          string    `json:"job_id"`
-	AttemptID      string    `json:"attempt_id"`
-	ModelID        string    `json:"model_id"`
-	RuntimeHash    string    `json:"runtime_hash"`
-	ModelHash      string    `json:"model_hash"`
-	Usage          Usage     `json:"usage"`
-	DurationMillis int64     `json:"duration_millis"`
-	FinishReason   string    `json:"finish_reason"`
-	CompletedAt    time.Time `json:"completed_at"`
+	JobID          string         `json:"job_id"`
+	AttemptID      string         `json:"attempt_id"`
+	ModelID        string         `json:"model_id"`
+	RuntimeHash    string         `json:"runtime_hash"`
+	ModelHash      string         `json:"model_hash"`
+	Message        *ChatMessage   `json:"message,omitempty"`
+	Usage          Usage          `json:"usage"`
+	DurationMillis int64          `json:"duration_millis"`
+	FinishReason   string         `json:"finish_reason"`
+	CompletedAt    time.Time      `json:"completed_at"`
+	Signature      *NodeSignature `json:"signature,omitempty"`
+}
+
+type NodeSignature struct {
+	KeyID     string    `json:"key_id"`
+	Algorithm string    `json:"algorithm"`
+	Value     string    `json:"value"`
+	SignedAt  time.Time `json:"signed_at"`
 }
 
 type JobFailedPayload struct {

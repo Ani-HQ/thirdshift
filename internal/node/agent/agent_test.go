@@ -60,6 +60,25 @@ func TestCatalogRuntimeStatusProvider(t *testing.T) {
 	}
 }
 
+func TestCanonicalSHA256DoesNotDoublePrefix(t *testing.T) {
+	if got := canonicalSHA256("sha256:abc"); got != "sha256:abc" {
+		t.Fatalf("canonical prefixed hash = %q", got)
+	}
+	if got := canonicalSHA256("abc"); got != "sha256:abc" {
+		t.Fatalf("canonical raw hash = %q", got)
+	}
+}
+
+func TestExistingRuntimeProviderRejectsNonLoopback(t *testing.T) {
+	_, err := (ExistingRuntimeProvider{
+		CatalogDir: "../../../models/catalog",
+		BaseURL:    "http://0.0.0.0:8081",
+	}).Prepare(context.Background(), "thirdshift-tiny-chat-v1")
+	if err == nil {
+		t.Fatal("expected non-loopback runtime URL to be rejected")
+	}
+}
+
 func TestAgentSessionLifecycleWithFakeCoordinator(t *testing.T) {
 	now := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
 	validator, err := protocol.NewValidator("../../../packages/protocol/schemas")

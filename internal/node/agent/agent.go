@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,10 +19,12 @@ import (
 	"github.com/anianroid/thirdshift/internal/node/control"
 	"github.com/anianroid/thirdshift/internal/node/identity"
 	"github.com/anianroid/thirdshift/internal/node/models"
+	noderuntime "github.com/anianroid/thirdshift/internal/node/runtime"
 	"github.com/anianroid/thirdshift/internal/node/session"
 	nodestate "github.com/anianroid/thirdshift/internal/node/state"
 	"github.com/anianroid/thirdshift/internal/node/telemetry"
 	"github.com/anianroid/thirdshift/internal/shared/ids"
+	"github.com/anianroid/thirdshift/internal/shared/nodeauth"
 	"github.com/anianroid/thirdshift/internal/shared/protocol"
 	"github.com/anianroid/thirdshift/internal/shared/version"
 	"nhooyr.io/websocket"
@@ -31,6 +34,7 @@ type RuntimeStatus struct {
 	ModelID     string
 	RuntimeHash string
 	ModelHash   string
+	BaseURL     string
 }
 
 type RuntimeStatusProvider interface {
@@ -53,6 +57,7 @@ type Options struct {
 	Backoff           session.Backoff
 	Now               func() time.Time
 	Output            io.Writer
+	PrivateKey        ed25519.PrivateKey
 }
 
 type Agent struct {
@@ -64,9 +69,11 @@ type Agent struct {
 	sessionID       string
 	connected       bool
 	sequence        int64
+	activeJobID     *string
 	lastHeartbeatAt *time.Time
 	lastError       string
 	startedAt       time.Time
+	writeMu         sync.Mutex
 }
 
 func Run(ctx context.Context, opts Options) error {
@@ -123,6 +130,13 @@ func New(opts Options) (*Agent, error) {
 		if opts.CoordinatorURL == "" {
 			opts.CoordinatorURL = creds.CoordinatorURL
 		}
+	}
+	if opts.PrivateKey == nil {
+		privateKey, _, err := identity.LoadOrCreateKey(opts.DataDir)
+		if err != nil {
+			return nil, err
+		}
+		opts.PrivateKey = privateKey
 	}
 	if opts.ModelID == "" {
 		cfg, err := config.Load(opts.DataDir)
@@ -253,10 +267,16 @@ func (a *Agent) runSession(ctx context.Context) error {
 	if err := a.sendHeartbeat(ctx, conn); err != nil {
 		return err
 	}
+	readErr := make(chan error, 1)
+	go func() {
+		readErr <- a.readCoordinator(ctx, conn)
+	}()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case err := <-readErr:
+			return err
 		case <-ticker.C:
 			if err := a.sendHeartbeat(ctx, conn); err != nil {
 				return err
@@ -265,10 +285,42 @@ func (a *Agent) runSession(ctx context.Context) error {
 	}
 }
 
+func (a *Agent) readCoordinator(ctx context.Context, conn *websocket.Conn) error {
+	for {
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			return err
+		}
+		envelope, err := a.opts.Validator.ValidateEnvelope(data)
+		if err != nil {
+			return err
+		}
+		switch envelope.Type {
+		case protocol.TypeJobOffer:
+			var offer protocol.JobOfferPayload
+			if err := json.Unmarshal(envelope.Payload, &offer); err != nil {
+				return fmt.Errorf("decode job.offer: %w", err)
+			}
+			if err := a.handleJobOffer(ctx, conn, offer); err != nil {
+				return err
+			}
+		case protocol.TypeJobCancel:
+			// Cancellation is best-effort in M3. Jobs already running continue to
+			// deadline; queued/leased jobs are cancelled coordinator-side.
+		case protocol.TypeNodeConfigUpdated, protocol.TypeModelAssign, protocol.TypeModelUnload, protocol.TypeNodeDrain, protocol.TypeRuntimeUpdateAvailable:
+			// These messages are part of the protocol but their behavior lands in
+			// later milestones.
+		default:
+			return fmt.Errorf("unsupported coordinator message %s", envelope.Type)
+		}
+	}
+}
+
 func (a *Agent) sendHeartbeat(ctx context.Context, conn *websocket.Conn) error {
 	a.mu.Lock()
 	state := a.state
 	runtimeStatus := a.runtimeStatus
+	activeJobID := cloneStringPtr(a.activeJobID)
 	a.sequence++
 	sequence := a.sequence
 	uptime := int64(a.opts.now().Sub(a.startedAt).Seconds())
@@ -278,7 +330,7 @@ func (a *Agent) sendHeartbeat(ctx context.Context, conn *websocket.Conn) error {
 	if err != nil {
 		gpu = protocol.GPUStatus{Name: "telemetry-unavailable"}
 	}
-	heartbeat := BuildHeartbeat(a.opts.NodeID, sequence, state, runtimeStatus, gpu, uptime, a.opts.now())
+	heartbeat := buildHeartbeat(a.opts.NodeID, sequence, state, runtimeStatus, gpu, activeJobID, uptime, a.opts.now())
 	if err := a.writeEnvelope(ctx, conn, protocol.TypeNodeHeartbeat, heartbeat); err != nil {
 		return err
 	}
@@ -292,6 +344,10 @@ func (a *Agent) sendHeartbeat(ctx context.Context, conn *websocket.Conn) error {
 }
 
 func BuildHeartbeat(nodeID string, sequence int64, state nodestate.State, runtimeStatus RuntimeStatus, gpu protocol.GPUStatus, uptimeSeconds int64, now time.Time) protocol.NodeHeartbeatPayload {
+	return buildHeartbeat(nodeID, sequence, state, runtimeStatus, gpu, nil, uptimeSeconds, now)
+}
+
+func buildHeartbeat(nodeID string, sequence int64, state nodestate.State, runtimeStatus RuntimeStatus, gpu protocol.GPUStatus, activeJobID *string, uptimeSeconds int64, now time.Time) protocol.NodeHeartbeatPayload {
 	return protocol.NodeHeartbeatPayload{
 		NodeID:        nodeID,
 		Sequence:      sequence,
@@ -300,7 +356,7 @@ func BuildHeartbeat(nodeID string, sequence int64, state nodestate.State, runtim
 		RuntimeHash:   runtimeStatus.RuntimeHash,
 		ModelHash:     runtimeStatus.ModelHash,
 		GPU:           gpu,
-		ActiveJobID:   nil,
+		ActiveJobID:   activeJobID,
 		UptimeSeconds: uptimeSeconds,
 		Timestamp:     now.UTC(),
 	}
@@ -319,7 +375,209 @@ func (a *Agent) writeEnvelope(ctx context.Context, conn *websocket.Conn, typ pro
 	if err != nil {
 		return err
 	}
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
 	return conn.Write(ctx, websocket.MessageText, data)
+}
+
+func (a *Agent) handleJobOffer(ctx context.Context, conn *websocket.Conn, offer protocol.JobOfferPayload) error {
+	runtimeStatus, rejectReason := a.claimJob(offer)
+	if rejectReason != "" {
+		return a.writeEnvelope(ctx, conn, protocol.TypeJobRejected, protocol.JobRejectedPayload{
+			JobID:      offer.JobID,
+			AttemptID:  offer.AttemptID,
+			ReasonCode: "node_not_eligible",
+			Message:    rejectReason,
+			Retryable:  true,
+			RejectedAt: a.opts.now(),
+		})
+	}
+	defer a.releaseJob()
+
+	acceptedAt := a.opts.now()
+	if err := a.writeEnvelope(ctx, conn, protocol.TypeJobAccepted, protocol.JobAcceptedPayload{
+		JobID:      offer.JobID,
+		AttemptID:  offer.AttemptID,
+		AcceptedAt: acceptedAt,
+	}); err != nil {
+		return err
+	}
+	startedAt := a.opts.now()
+	if err := a.writeEnvelope(ctx, conn, protocol.TypeJobStarted, protocol.JobStartedPayload{
+		JobID:     offer.JobID,
+		AttemptID: offer.AttemptID,
+		StartedAt: startedAt,
+	}); err != nil {
+		return err
+	}
+
+	jobCtx := ctx
+	var cancel context.CancelFunc
+	if !offer.DeadlineAt.IsZero() {
+		jobCtx, cancel = context.WithDeadline(ctx, offer.DeadlineAt)
+		defer cancel()
+	}
+	start := a.opts.now()
+	completion, err := noderuntime.ChatCompletion(jobCtx, runtimeStatus.BaseURL, noderuntime.CompletionRequest{
+		Model:       offer.ModelID,
+		Messages:    runtimeMessages(offer.Request.Messages),
+		Temperature: temperatureValue(offer.Request.Temperature),
+		MaxTokens:   offer.Request.MaxTokens,
+		Stream:      false,
+	})
+	if err != nil {
+		return a.writeEnvelope(ctx, conn, protocol.TypeJobFailed, protocol.JobFailedPayload{
+			JobID:     offer.JobID,
+			AttemptID: offer.AttemptID,
+			ErrorCode: "runtime_error",
+			Message:   "Local runtime request failed.",
+			Retryable: true,
+			FailedAt:  a.opts.now(),
+		})
+	}
+	if len(completion.Choices) == 0 {
+		return a.writeEnvelope(ctx, conn, protocol.TypeJobFailed, protocol.JobFailedPayload{
+			JobID:     offer.JobID,
+			AttemptID: offer.AttemptID,
+			ErrorCode: "empty_completion",
+			Message:   "Local runtime returned no choices.",
+			Retryable: false,
+			FailedAt:  a.opts.now(),
+		})
+	}
+	finishReason := completion.Choices[0].FinishReason
+	if finishReason == "" {
+		finishReason = "stop"
+	}
+	completedAt := a.opts.now()
+	payload := protocol.JobCompletedPayload{
+		JobID:       offer.JobID,
+		AttemptID:   offer.AttemptID,
+		ModelID:     offer.ModelID,
+		RuntimeHash: runtimeStatus.RuntimeHash,
+		ModelHash:   runtimeStatus.ModelHash,
+		Message: &protocol.ChatMessage{
+			Role:    completion.Choices[0].Message.Role,
+			Content: completion.Choices[0].Message.Content,
+		},
+		Usage: protocol.Usage{
+			PromptTokens:     completion.Usage.PromptTokens,
+			CompletionTokens: completion.Usage.CompletionTokens,
+			TotalTokens:      completion.Usage.TotalTokens,
+		},
+		DurationMillis: maxInt64(0, completedAt.Sub(start).Milliseconds()),
+		FinishReason:   finishReason,
+		CompletedAt:    completedAt,
+	}
+	signature, err := nodeauth.SignJobCompleted(a.opts.PrivateKey, a.opts.NodeID, payload, completedAt)
+	if err != nil {
+		return a.writeEnvelope(ctx, conn, protocol.TypeJobFailed, protocol.JobFailedPayload{
+			JobID:     offer.JobID,
+			AttemptID: offer.AttemptID,
+			ErrorCode: "signature_failed",
+			Message:   "Node could not sign the job result.",
+			Retryable: false,
+			FailedAt:  a.opts.now(),
+		})
+	}
+	payload.Signature = &signature
+	return a.writeEnvelope(ctx, conn, protocol.TypeJobCompleted, payload)
+}
+
+func (a *Agent) claimJob(offer protocol.JobOfferPayload) (RuntimeStatus, string) {
+	if a.opts.now().After(offer.LeaseExpiresAt) {
+		return RuntimeStatus{}, "job lease expired"
+	}
+	if err := validateOfferRequest(offer.Request); err != nil {
+		return RuntimeStatus{}, err.Error()
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.state != nodestate.Available {
+		return RuntimeStatus{}, "node is not available"
+	}
+	runtimeStatus := a.runtimeStatus
+	if runtimeStatus.ModelID != offer.ModelID {
+		return RuntimeStatus{}, "requested model is not loaded"
+	}
+	if runtimeStatus.ModelHash == "" || runtimeStatus.RuntimeHash == "" {
+		return RuntimeStatus{}, "manifest hashes are not ready"
+	}
+	if runtimeStatus.BaseURL == "" {
+		return RuntimeStatus{}, "local runtime is not reachable"
+	}
+	if err := nodestate.Transition(a.state, nodestate.Busy); err != nil {
+		return RuntimeStatus{}, err.Error()
+	}
+	activeJobID := offer.JobID
+	a.activeJobID = &activeJobID
+	a.state = nodestate.Busy
+	a.lastError = ""
+	a.writeStatusLocked()
+	return runtimeStatus, ""
+}
+
+func (a *Agent) releaseJob() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.activeJobID = nil
+	if a.state == nodestate.Busy {
+		a.state = nodestate.Available
+	}
+	a.writeStatusLocked()
+}
+
+func validateOfferRequest(req protocol.ChatRequest) error {
+	if req.Stream {
+		return fmt.Errorf("streaming jobs are not supported")
+	}
+	if len(req.Messages) == 0 {
+		return fmt.Errorf("job request has no messages")
+	}
+	if req.MaxTokens <= 0 || req.MaxTokens > 1024 {
+		return fmt.Errorf("job request max_tokens is outside node limits")
+	}
+	for _, message := range req.Messages {
+		switch message.Role {
+		case "system", "user", "assistant":
+		default:
+			return fmt.Errorf("job request contains unsupported role")
+		}
+		if strings.TrimSpace(message.Content) == "" {
+			return fmt.Errorf("job request contains an empty text message")
+		}
+	}
+	return nil
+}
+
+func runtimeMessages(messages []protocol.ChatMessage) []noderuntime.ChatMessage {
+	converted := make([]noderuntime.ChatMessage, 0, len(messages))
+	for _, message := range messages {
+		converted = append(converted, noderuntime.ChatMessage{Role: message.Role, Content: message.Content})
+	}
+	return converted
+}
+
+func temperatureValue(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func cloneStringPtr(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (a *Agent) handleControl(command control.Command) control.Response {
@@ -492,7 +750,39 @@ func (p CatalogRuntimeStatusProvider) Prepare(_ context.Context, modelID string)
 	}
 	return RuntimeStatus{
 		ModelID:     manifest.ModelID,
-		RuntimeHash: "sha256:" + manifest.Runtime.BinarySHA256,
-		ModelHash:   "sha256:" + manifest.Source.SHA256,
+		RuntimeHash: canonicalSHA256(manifest.Runtime.BinarySHA256),
+		ModelHash:   canonicalSHA256(manifest.Source.SHA256),
 	}, nil
+}
+
+type ExistingRuntimeProvider struct {
+	CatalogDir string
+	BaseURL    string
+}
+
+func (p ExistingRuntimeProvider) Prepare(ctx context.Context, modelID string) (RuntimeStatus, error) {
+	parsed, err := url.Parse(p.BaseURL)
+	if err != nil {
+		return RuntimeStatus{}, fmt.Errorf("parse runtime base URL: %w", err)
+	}
+	if parsed.Scheme != "http" || parsed.Hostname() != "127.0.0.1" {
+		return RuntimeStatus{}, fmt.Errorf("runtime base URL must use http://127.0.0.1:<port>")
+	}
+	status, err := (CatalogRuntimeStatusProvider{CatalogDir: p.CatalogDir}).Prepare(ctx, modelID)
+	if err != nil {
+		return RuntimeStatus{}, err
+	}
+	status.BaseURL = strings.TrimRight(p.BaseURL, "/")
+	return status, nil
+}
+
+func canonicalSHA256(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(value, "sha256:") {
+		return value
+	}
+	return "sha256:" + value
 }

@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
 )
 
 const (
@@ -18,6 +20,13 @@ const (
 	envHeartbeatSeconds   = "THIRDSHIFT_HEARTBEAT_INTERVAL_SECONDS"
 	envStaleAfterSeconds  = "THIRDSHIFT_SESSION_STALE_AFTER_SECONDS"
 	envSweepSeconds       = "THIRDSHIFT_STALE_SWEEP_INTERVAL_SECONDS"
+	envSchedulerWarm      = "THIRDSHIFT_SCHEDULER_WEIGHT_WARM_MODEL"
+	envSchedulerSuccess   = "THIRDSHIFT_SCHEDULER_WEIGHT_SUCCESS_RATE"
+	envSchedulerTPS       = "THIRDSHIFT_SCHEDULER_WEIGHT_TOKENS_PER_SECOND"
+	envSchedulerFailures  = "THIRDSHIFT_SCHEDULER_WEIGHT_RECENT_FAILURE"
+	envSchedulerThermal   = "THIRDSHIFT_SCHEDULER_WEIGHT_THERMAL"
+	envSchedulerFairness  = "THIRDSHIFT_SCHEDULER_WEIGHT_FAIRNESS"
+	envSchedulerRegion    = "THIRDSHIFT_SCHEDULER_WEIGHT_REGION"
 )
 
 type Config struct {
@@ -30,9 +39,11 @@ type Config struct {
 	HeartbeatInterval  time.Duration
 	SessionStaleAfter  time.Duration
 	StaleSweepInterval time.Duration
+	SchedulerWeights   jobs.SchedulerWeights
 }
 
 func Load(defaultVersion string) Config {
+	weights := jobs.DefaultSchedulerWeights()
 	cfg := Config{
 		Addr:               getenv(envCoordinatorAddr, defaultCoordinatorAddr),
 		Version:            getenv(envThirdshiftVersion, defaultVersion),
@@ -41,6 +52,15 @@ func Load(defaultVersion string) Config {
 		HeartbeatInterval:  durationSeconds(envHeartbeatSeconds, 15*time.Second),
 		SessionStaleAfter:  durationSeconds(envStaleAfterSeconds, 45*time.Second),
 		StaleSweepInterval: durationSeconds(envSweepSeconds, 15*time.Second),
+		SchedulerWeights: jobs.SchedulerWeights{
+			WarmModelBonus:            floatEnv(envSchedulerWarm, weights.WarmModelBonus),
+			RollingSuccessRate:        floatEnv(envSchedulerSuccess, weights.RollingSuccessRate),
+			NormalizedTokensPerSecond: floatEnv(envSchedulerTPS, weights.NormalizedTokensPerSecond),
+			LowRecentFailureBonus:     floatEnv(envSchedulerFailures, weights.LowRecentFailureBonus),
+			ThermalHeadroom:           floatEnv(envSchedulerThermal, weights.ThermalHeadroom),
+			HostFairness:              floatEnv(envSchedulerFairness, weights.HostFairness),
+			RegionalPreference:        floatEnv(envSchedulerRegion, weights.RegionalPreference),
+		},
 	}
 
 	if value := os.Getenv(envThirdshiftDatabase); value != "" {
@@ -72,4 +92,16 @@ func durationSeconds(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+func floatEnv(key string, fallback float64) float64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

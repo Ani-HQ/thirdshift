@@ -19,6 +19,9 @@ type Manifest struct {
 	Runtime       Runtime
 	Hardware      Hardware
 	Limits        Limits
+	Capabilities  Capabilities
+	Policy        Policy
+	Pricing       Pricing
 }
 
 type Source struct {
@@ -66,6 +69,24 @@ type Limits struct {
 	MaxInputTokens  int
 	MaxOutputTokens int
 	MaxRequestBytes int
+}
+
+type Capabilities struct {
+	ChatCompletions bool
+	Streaming       bool
+	Tools           bool
+	Embeddings      bool
+}
+
+type Policy struct {
+	DataClass            string
+	ContentFilterProfile string
+}
+
+type Pricing struct {
+	CustomerInputPerMillionUSD            float64
+	CustomerOutputPerMillionUSD           float64
+	HostCreditPerMillionAcceptedOutputUSD float64
 }
 
 func LoadCatalogManifest(catalogDir, modelID string) (Manifest, string, error) {
@@ -244,6 +265,41 @@ func assignSection(manifest *Manifest, section, key, value string) error {
 			manifest.Limits.MaxOutputTokens = parsed
 		case "max_request_bytes":
 			manifest.Limits.MaxRequestBytes = parsed
+		}
+	case "capabilities":
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("capability %s must be a boolean: %w", key, err)
+		}
+		switch key {
+		case "chat_completions":
+			manifest.Capabilities.ChatCompletions = parsed
+		case "streaming":
+			manifest.Capabilities.Streaming = parsed
+		case "tools":
+			manifest.Capabilities.Tools = parsed
+		case "embeddings":
+			manifest.Capabilities.Embeddings = parsed
+		}
+	case "policy":
+		switch key {
+		case "data_class":
+			manifest.Policy.DataClass = value
+		case "content_filter_profile":
+			manifest.Policy.ContentFilterProfile = value
+		}
+	case "pricing":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return fmt.Errorf("pricing %s must be a number: %w", key, err)
+		}
+		switch key {
+		case "customer_input_per_million_usd":
+			manifest.Pricing.CustomerInputPerMillionUSD = parsed
+		case "customer_output_per_million_usd":
+			manifest.Pricing.CustomerOutputPerMillionUSD = parsed
+		case "host_credit_per_million_accepted_output_usd":
+			manifest.Pricing.HostCreditPerMillionAcceptedOutputUSD = parsed
 		}
 	}
 	return nil

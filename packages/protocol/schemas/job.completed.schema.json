@@ -17,6 +17,15 @@
             "model_id": {"type": "string"},
             "runtime_hash": {"type": "string", "pattern": "^sha256:.+"},
             "model_hash": {"type": "string", "pattern": "^sha256:.+"},
+            "message": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["role", "content"],
+              "properties": {
+                "role": {"type": "string"},
+                "content": {"type": "string"}
+              }
+            },
             "usage": {
               "type": "object",
               "additionalProperties": false,
@@ -29,11 +38,21 @@
             },
             "duration_millis": {"type": "integer", "minimum": 0},
             "finish_reason": {"type": "string"},
-            "completed_at": {"type": "string", "format": "date-time"}
+            "completed_at": {"type": "string", "format": "date-time"},
+            "signature": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key_id", "algorithm", "value", "signed_at"],
+              "properties": {
+                "key_id": {"type": "string"},
+                "algorithm": {"const": "ed25519"},
+                "value": {"type": "string"},
+                "signed_at": {"type": "string", "format": "date-time"}
+              }
+            }
           }
         }
       }
     }
   ]
 }
-

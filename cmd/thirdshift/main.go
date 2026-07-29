@@ -91,6 +91,7 @@ func runStart(args []string) error {
 	coordinatorURL := fs.String("coordinator", os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "coordinator base URL override")
 	modelID := fs.String("model", os.Getenv("THIRDSHIFT_MODEL_ID"), "model id")
 	catalogDir := fs.String("catalog-dir", "models/catalog", "model catalog directory")
+	runtimeBaseURL := fs.String("runtime-base-url", os.Getenv("THIRDSHIFT_RUNTIME_BASE_URL"), "development-only existing loopback llama-compatible runtime URL")
 	heartbeatInterval := fs.Duration("heartbeat-interval", 15*time.Second, "heartbeat interval")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -118,6 +119,10 @@ func runStart(args []string) error {
 	if err != nil {
 		return err
 	}
+	var runtimeProvider nodeagent.RuntimeStatusProvider
+	if *runtimeBaseURL != "" {
+		runtimeProvider = nodeagent.ExistingRuntimeProvider{CatalogDir: *catalogDir, BaseURL: *runtimeBaseURL}
+	}
 	fmt.Fprintf(os.Stdout, "starting node %s\n", login.Credentials.NodeID)
 	return nodeagent.Run(ctx, nodeagent.Options{
 		DataDir:           cfg.DataDir,
@@ -127,6 +132,7 @@ func runStart(args []string) error {
 		AccessToken:       login.Credentials.AccessToken,
 		NodeID:            login.Credentials.NodeID,
 		HeartbeatInterval: *heartbeatInterval,
+		Runtime:           runtimeProvider,
 		Output:            os.Stdout,
 	})
 }
@@ -269,7 +275,7 @@ func printUsage(w *os.File) {
 	fmt.Fprintln(w, "usage:")
 	fmt.Fprintln(w, "  thirdshift doctor [--json]")
 	fmt.Fprintln(w, "  thirdshift login --invite <token> --coordinator <url>")
-	fmt.Fprintln(w, "  thirdshift start")
+	fmt.Fprintln(w, "  thirdshift start [--runtime-base-url http://127.0.0.1:<port>]")
 	fmt.Fprintln(w, "  thirdshift status [--json]")
 	fmt.Fprintln(w, "  thirdshift pause")
 	fmt.Fprintln(w, "  thirdshift resume")

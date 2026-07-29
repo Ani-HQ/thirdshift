@@ -64,3 +64,77 @@ thirdshift resume --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
 ```
 
 Expected result: `thirdshift status` shows the node id, `AVAILABLE` or `PAUSED` state, model id, GPU block, and session connectivity. `admin-cli nodes list` shows the same node with recent heartbeat age and `connected` session status.
+
+## Milestone 3 Routed Local Request
+
+This sequence runs the coordinator locally, attaches a node to the in-repo fake llama-compatible runtime, and completes one developer request through `/v1/chat/completions`.
+
+Terminal 1:
+
+```sh
+docker compose -f deploy/docker-compose.yml up -d postgres
+
+export THIRDSHIFT_OPERATOR_TOKEN=dev-operator-token
+export THIRDSHIFT_ACCESS_TOKEN_SECRET=dev-access-token-secret-change-me
+export THIRDSHIFT_COORDINATOR_URL=http://127.0.0.1:8080
+export THIRDSHIFT_COORDINATOR_ADDR=:8080
+export THIRDSHIFT_DATABASE_URL='postgres://thirdshift:thirdshift_dev_password@localhost:5432/thirdshift?sslmode=disable'
+
+go run ./cmd/admin-cli migrate --database-url "$THIRDSHIFT_DATABASE_URL"
+go run ./cmd/coordinator
+```
+
+Terminal 2:
+
+```sh
+go run ./tests/fixtures/fake-llama-server --host 127.0.0.1 --port 18081 --model fake.gguf
+```
+
+Terminal 3:
+
+```sh
+export THIRDSHIFT_OPERATOR_TOKEN=dev-operator-token
+export THIRDSHIFT_COORDINATOR_URL=http://127.0.0.1:8080
+export THIRDSHIFT_NODE_DATA_DIR="$(pwd)/.local/thirdshift-m3-node"
+export FLEET_ID=fleet_01J0M000000000000000000000
+
+go run ./cmd/admin-cli catalog sync --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+
+export ORG_ID="$(
+  go run ./cmd/admin-cli org create --name "Thirdshift Dev" --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN" |
+  awk '/^org_id:/ {print $2}'
+)"
+
+export THIRDSHIFT_API_KEY="$(
+  go run ./cmd/admin-cli apikey create --org "$ORG_ID" --model thirdshift-tiny-chat-v1 --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN" |
+  awk '/^key:/ {print $2}'
+)"
+
+export THIRDSHIFT_INVITE_TOKEN="$(
+  go run ./cmd/admin-cli invite create --fleet "$FLEET_ID" --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN" |
+  awk '/^token:/ {print $2}'
+)"
+
+go run ./cmd/thirdshift login --invite "$THIRDSHIFT_INVITE_TOKEN" --coordinator "$THIRDSHIFT_COORDINATOR_URL" --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
+go run ./cmd/thirdshift start --coordinator "$THIRDSHIFT_COORDINATOR_URL" --data-dir "$THIRDSHIFT_NODE_DATA_DIR" --runtime-base-url http://127.0.0.1:18081 --heartbeat-interval 5s &
+export THIRDSHIFT_NODE_PID=$!
+sleep 3
+
+curl -sS "$THIRDSHIFT_COORDINATOR_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $THIRDSHIFT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: demo-001" \
+  -d '{
+    "model": "thirdshift-tiny-chat-v1",
+    "messages": [{"role":"user","content":"Write one short Thirdshift demo sentence."}],
+    "temperature": 0.2,
+    "max_tokens": 32,
+    "stream": false
+  }'
+
+go run ./cmd/thirdshift status --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
+go run ./cmd/admin-cli nodes list --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+kill "$THIRDSHIFT_NODE_PID"
+```
+
+Expected result: the curl response has `object: "chat.completion"`, one assistant message, `usage`, and a `thirdshift` object containing `job_id`, `attempts`, `data_class`, and `served_region`.

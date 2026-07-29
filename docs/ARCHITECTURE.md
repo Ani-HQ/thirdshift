@@ -35,3 +35,17 @@ Milestone 2 adds invited registration and persistent coordinator sessions.
 - `thirdshift start` loads the signed runtime and model through the Milestone 1 managers, starts `llama-server` on loopback, opens one outbound WebSocket, sends `node.hello`, and heartbeats current state, model/runtime hashes, and GPU telemetry.
 - The node state machine is explicit and rejects illegal transitions. `pause`, `resume`, and `status` use a local control channel: Unix socket on non-Windows, localhost-bound Windows stub until named-pipe integration is implemented.
 - The coordinator persists sessions and heartbeats in PostgreSQL. A configurable sweeper marks sessions stale after missed heartbeats and sets the scheduler-visible node state to `OFFLINE`.
+
+## Routed Developer Requests
+
+Milestone 3 adds the first coordinator-mediated inference path.
+
+- Operators create organizations, sync valid catalog manifests into PostgreSQL, and issue API keys through operator-authenticated internal endpoints.
+- Public `/v1/*` developer APIs authenticate bearer API keys, enforce per-key model permissions, apply an in-memory per-minute rate limit, and return the stable §15.5 error shape.
+- `/v1/models` reports catalog metadata, pricing, data class, version, limits, and current availability based on connected `AVAILABLE` nodes with fresh heartbeats.
+- `/v1/chat/completions` accepts only the P0 OpenAI-compatible subset: non-streaming, text-only messages, no tools/images/files, exact model ids, and manifest request/token limits.
+- The scheduler applies hard filters for connected session, fresh heartbeat, `AVAILABLE` state, exact model, verified model/runtime hashes, no active job, and no quarantine. Schedule, data-class, and richer reputation filters are wired as later-milepost TODOs.
+- Scoring uses coordinator config weights and deterministic tie-breaking. A lease creates a `job_attempts` row before the `job.offer` envelope is sent.
+- The node executor accepts one eligible offer, transitions to `BUSY`, calls the loopback llama-compatible runtime, signs `job.completed` with the node identity key, and returns to `AVAILABLE`.
+- The coordinator verifies the node signature and model/runtime hashes before accepting the result, storing it, completing the job, and waking the waiting sync request.
+- `Idempotency-Key` records map a request hash to the completed job response; duplicate matching requests replay the same stored response without re-execution.

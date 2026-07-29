@@ -81,6 +81,59 @@ if ($ok) {
     }
 }
 
+$ApiKey = $env:THIRDSHIFT_API_KEY
+
+$ok = Run-Check "M3 environment" {
+    if ([string]::IsNullOrWhiteSpace($CoordinatorUrl)) {
+        throw "set THIRDSHIFT_COORDINATOR_URL"
+    }
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        throw "set THIRDSHIFT_API_KEY"
+    }
+}
+if (-not $ok) { $failed++ }
+
+if ($ok) {
+    $Agent = $null
+    $ok = Run-Check "M3 start node for routed request" {
+        $StartArgs = @("run", "./cmd/thirdshift", "start", "--coordinator", $CoordinatorUrl, "--data-dir", $DataDir, "--heartbeat-interval", "5s")
+        if (-not [string]::IsNullOrWhiteSpace($env:THIRDSHIFT_RUNTIME_BASE_URL)) {
+            $StartArgs += @("--runtime-base-url", $env:THIRDSHIFT_RUNTIME_BASE_URL)
+        }
+        $Agent = Start-Process go -ArgumentList $StartArgs -PassThru
+        Start-Sleep -Seconds 15
+        go run ./cmd/thirdshift status --data-dir $DataDir
+    }
+    if (-not $ok) { $failed++ }
+
+    $ok = Run-Check "M3 routed chat completion" {
+        $Body = @{
+            model = "thirdshift-tiny-chat-v1"
+            messages = @(@{ role = "user"; content = "Reply with one short Thirdshift Windows verification sentence." })
+            temperature = 0.2
+            max_tokens = 32
+            stream = $false
+        } | ConvertTo-Json -Depth 5
+        $Headers = @{
+            Authorization = "Bearer $ApiKey"
+            "Idempotency-Key" = "verify-windows-m3-001"
+        }
+        $Response = Invoke-RestMethod -Method Post -Uri "$CoordinatorUrl/v1/chat/completions" -Headers $Headers -ContentType "application/json" -Body $Body
+        if ($Response.object -ne "chat.completion") {
+            throw "unexpected object $($Response.object)"
+        }
+        if ([string]::IsNullOrWhiteSpace($Response.thirdshift.job_id)) {
+            throw "missing thirdshift.job_id"
+        }
+        $Response | ConvertTo-Json -Depth 8
+    }
+    if (-not $ok) { $failed++ }
+
+    if ($Agent -ne $null -and -not $Agent.HasExited) {
+        Stop-Process -Id $Agent.Id -Force
+    }
+}
+
 if ($failed -gt 0) {
     Write-Host "$failed check(s) failed."
     exit 1

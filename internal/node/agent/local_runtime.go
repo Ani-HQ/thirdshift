@@ -119,8 +119,9 @@ func (p *LocalRuntimeProvider) Prepare(ctx context.Context, modelID string) (Run
 	p.mu.Unlock()
 	return RuntimeStatus{
 		ModelID:     manifest.ModelID,
-		RuntimeHash: "sha256:" + installed.SHA256,
-		ModelHash:   "sha256:" + manifest.Source.SHA256,
+		RuntimeHash: canonicalSHA256(installed.SHA256),
+		ModelHash:   canonicalSHA256(manifest.Source.SHA256),
+		BaseURL:     running.BaseURL,
 	}, nil
 }
 

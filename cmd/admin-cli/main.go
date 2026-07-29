@@ -29,6 +29,12 @@ func run(args []string) error {
 	switch args[0] {
 	case "migrate":
 		return migrate(args[1:])
+	case "org":
+		return org(args[1:])
+	case "apikey":
+		return apikey(args[1:])
+	case "catalog":
+		return catalog(args[1:])
 	case "invite":
 		return invite(args[1:])
 	case "nodes":
@@ -38,6 +44,123 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usageText())
 	}
+}
+
+func org(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("org command is required\n\n%s", usageText())
+	}
+	switch args[0] {
+	case "create":
+		return orgCreate(args[1:])
+	default:
+		return fmt.Errorf("unknown org command %q\n\n%s", args[0], usageText())
+	}
+}
+
+func orgCreate(args []string) error {
+	fs := flag.NewFlagSet("org create", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	name := fs.String("name", "", "organization name")
+	coordinatorURL := fs.String("coordinator", firstNonEmpty(os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "http://127.0.0.1:8080"), "coordinator base URL")
+	operatorToken := fs.String("operator-token", os.Getenv("THIRDSHIFT_OPERATOR_TOKEN"), "operator bearer token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *name == "" {
+		return fmt.Errorf("--name is required")
+	}
+	if *operatorToken == "" {
+		return fmt.Errorf("operator token is required; set THIRDSHIFT_OPERATOR_TOKEN or pass --operator-token")
+	}
+	var resp struct {
+		OrgID string `json:"org_id"`
+		Name  string `json:"name"`
+	}
+	if err := postAdminJSON(*coordinatorURL+"/internal/v1/orgs", *operatorToken, map[string]string{"name": *name}, &resp); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "org_id: %s\nname: %s\n", resp.OrgID, resp.Name)
+	return nil
+}
+
+func apikey(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("apikey command is required\n\n%s", usageText())
+	}
+	switch args[0] {
+	case "create":
+		return apikeyCreate(args[1:])
+	default:
+		return fmt.Errorf("unknown apikey command %q\n\n%s", args[0], usageText())
+	}
+}
+
+func apikeyCreate(args []string) error {
+	fs := flag.NewFlagSet("apikey create", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	orgID := fs.String("org", "", "organization id")
+	name := fs.String("name", "default", "API key name")
+	modelIDs := multiFlag{}
+	fs.Var(&modelIDs, "model", "allowed model id; repeatable")
+	coordinatorURL := fs.String("coordinator", firstNonEmpty(os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "http://127.0.0.1:8080"), "coordinator base URL")
+	operatorToken := fs.String("operator-token", os.Getenv("THIRDSHIFT_OPERATOR_TOKEN"), "operator bearer token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *orgID == "" {
+		return fmt.Errorf("--org is required")
+	}
+	if *operatorToken == "" {
+		return fmt.Errorf("operator token is required; set THIRDSHIFT_OPERATOR_TOKEN or pass --operator-token")
+	}
+	var resp struct {
+		APIKeyID string `json:"api_key_id"`
+		Key      string `json:"key"`
+	}
+	if err := postAdminJSON(*coordinatorURL+"/internal/v1/api-keys", *operatorToken, map[string]any{
+		"org_id": *orgID,
+		"name":   *name,
+		"models": []string(modelIDs),
+	}, &resp); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "api_key_id: %s\nkey: %s\n", resp.APIKeyID, resp.Key)
+	return nil
+}
+
+func catalog(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("catalog command is required\n\n%s", usageText())
+	}
+	switch args[0] {
+	case "sync":
+		return catalogSync(args[1:])
+	default:
+		return fmt.Errorf("unknown catalog command %q\n\n%s", args[0], usageText())
+	}
+}
+
+func catalogSync(args []string) error {
+	fs := flag.NewFlagSet("catalog sync", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	catalogDir := fs.String("catalog-dir", "models/catalog", "model catalog directory")
+	coordinatorURL := fs.String("coordinator", firstNonEmpty(os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "http://127.0.0.1:8080"), "coordinator base URL")
+	operatorToken := fs.String("operator-token", os.Getenv("THIRDSHIFT_OPERATOR_TOKEN"), "operator bearer token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *operatorToken == "" {
+		return fmt.Errorf("operator token is required; set THIRDSHIFT_OPERATOR_TOKEN or pass --operator-token")
+	}
+	var resp struct {
+		Synced int `json:"synced"`
+	}
+	if err := postAdminJSON(*coordinatorURL+"/internal/v1/catalog/sync", *operatorToken, map[string]string{"catalog_dir": *catalogDir}, &resp); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "catalog: synced %d model manifest(s)\n", resp.Synced)
+	return nil
 }
 
 func invite(args []string) error {
@@ -175,7 +298,20 @@ func usage() error {
 }
 
 func usageText() string {
-	return "admin-cli commands:\n  migrate [--database-url URL] [--migrations-dir migrations]\n  invite create --fleet <fleet_id> [--coordinator URL]\n  nodes list [--coordinator URL]\n"
+	return "admin-cli commands:\n  migrate [--database-url URL] [--migrations-dir migrations]\n  org create --name <name> [--coordinator URL]\n  catalog sync [--catalog-dir models/catalog] [--coordinator URL]\n  apikey create --org <org_id> [--model <model_id>] [--coordinator URL]\n  invite create --fleet <fleet_id> [--coordinator URL]\n  nodes list [--coordinator URL]\n"
+}
+
+type multiFlag []string
+
+func (m *multiFlag) String() string {
+	return strings.Join(*m, ",")
+}
+
+func (m *multiFlag) Set(value string) error {
+	if value != "" {
+		*m = append(*m, value)
+	}
+	return nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -228,11 +364,19 @@ func getAdminJSON(endpoint, token string, target any) error {
 
 func decodeAPIError(resp *http.Response) error {
 	var body struct {
-		Error string `json:"error"`
+		Error any `json:"error"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&body)
-	if body.Error == "" {
-		body.Error = resp.Status
+	message := resp.Status
+	switch errBody := body.Error.(type) {
+	case string:
+		if errBody != "" {
+			message = errBody
+		}
+	case map[string]any:
+		if msg, ok := errBody["message"].(string); ok && msg != "" {
+			message = msg
+		}
 	}
-	return fmt.Errorf("%s: %s", resp.Request.URL.String(), strings.TrimSpace(body.Error))
+	return fmt.Errorf("%s: %s", resp.Request.URL.String(), strings.TrimSpace(message))
 }

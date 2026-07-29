@@ -23,7 +23,8 @@ type ChatMessage struct {
 
 type CompletionResponse struct {
 	Choices []struct {
-		Message ChatMessage `json:"message"`
+		Message      ChatMessage `json:"message"`
+		FinishReason string      `json:"finish_reason"`
 	} `json:"choices"`
 	Usage CompletionUsage `json:"usage"`
 }
