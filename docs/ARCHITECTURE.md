@@ -24,3 +24,14 @@ The Milestone 1 node code is split behind interfaces so macOS development can us
 - Model cache downloads by HTTP Range into `<sha256>.partial`, verifies byte length and SHA-256, atomically promotes to `<sha256>.gguf`, and applies LRU eviction without removing the active model.
 - The launcher accepts only typed manifest-approved llama.cpp arguments, rejects non-loopback hosts, chooses a dynamic loopback port, writes bounded redacted logs, polls `/health`, and stops gracefully before killing on timeout.
 - `thirdshift run-local` loads a catalog manifest, ensures the runtime and model are present, launches `llama-server` on `127.0.0.1`, sends one non-streaming chat completion request, and prints completion text plus usage.
+
+## Node Identity And Session
+
+Milestone 2 adds invited registration and persistent coordinator sessions.
+
+- `admin-cli invite create --fleet <fleet_id>` calls the coordinator internal API with an operator bearer token. The coordinator stores only a SHA-256 hash of the single-use invite and creates a short-lived bootstrap token after registration.
+- `thirdshift login` creates an Ed25519 keypair locally, stores the private key in a restricted file under the node data directory, submits the public key plus a hardware fingerprint hash, and stores the returned node credentials.
+- Re-login without an invite signs a token refresh request with the stored private key. The coordinator verifies the active public key and issues a fresh short-lived HMAC access token.
+- `thirdshift start` loads the signed runtime and model through the Milestone 1 managers, starts `llama-server` on loopback, opens one outbound WebSocket, sends `node.hello`, and heartbeats current state, model/runtime hashes, and GPU telemetry.
+- The node state machine is explicit and rejects illegal transitions. `pause`, `resume`, and `status` use a local control channel: Unix socket on non-Windows, localhost-bound Windows stub until named-pipe integration is implemented.
+- The coordinator persists sessions and heartbeats in PostgreSQL. A configurable sweeper marks sessions stale after missed heartbeats and sets the scheduler-visible node state to `OFFLINE`.

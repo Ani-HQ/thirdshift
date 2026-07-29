@@ -1,7 +1,7 @@
 GO ?= go
 MIGRATIONS_DIR ?= migrations
 
-.PHONY: build test lint migrate dev test-slice build-windows doctor-json run-local
+.PHONY: build test lint migrate dev test-slice test-integration build-windows doctor-json run-local coordinator invite nodes start status
 
 build:
 	$(GO) build ./...
@@ -22,6 +22,9 @@ dev:
 test-slice:
 	$(GO) test -tags slice ./cmd/thirdshift
 
+test-integration:
+	$(GO) test -tags integration ./...
+
 build-windows:
 	GOOS=windows GOARCH=amd64 $(GO) build ./...
 
@@ -30,3 +33,18 @@ doctor-json:
 
 run-local:
 	$(GO) run ./cmd/thirdshift run-local --model thirdshift-tiny-chat-v1 --prompt "$${PROMPT:-Say hello from Thirdshift.}"
+
+coordinator:
+	$(GO) run ./cmd/coordinator
+
+invite:
+	$(GO) run ./cmd/admin-cli invite create --fleet "$${FLEET_ID:?set FLEET_ID}"
+
+nodes:
+	$(GO) run ./cmd/admin-cli nodes list
+
+start:
+	$(GO) run ./cmd/thirdshift start
+
+status:
+	$(GO) run ./cmd/thirdshift status

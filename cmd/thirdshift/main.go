@@ -2,13 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
+	nodeagent "github.com/anianroid/thirdshift/internal/node/agent"
+	nodeconfig "github.com/anianroid/thirdshift/internal/node/config"
+	"github.com/anianroid/thirdshift/internal/node/control"
 	"github.com/anianroid/thirdshift/internal/node/hardware"
 	"github.com/anianroid/thirdshift/internal/node/local"
+	noderegistration "github.com/anianroid/thirdshift/internal/node/registration"
 	"github.com/anianroid/thirdshift/internal/shared/version"
 )
 
@@ -31,6 +38,16 @@ func run(args []string) error {
 	switch args[0] {
 	case "doctor":
 		return runDoctor(args[1:])
+	case "login":
+		return runLogin(args[1:])
+	case "start":
+		return runStart(args[1:])
+	case "status":
+		return runStatus(args[1:])
+	case "pause":
+		return runPauseResume("pause", args[1:])
+	case "resume":
+		return runPauseResume("resume", args[1:])
 	case "run-local":
 		return runLocal(args[1:])
 	case "help", "-h", "--help":
@@ -39,6 +56,131 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runLogin(args []string) error {
+	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	invite := fs.String("invite", "", "registration invite token")
+	coordinatorURL := fs.String("coordinator", os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "coordinator base URL")
+	dataDir := fs.String("data-dir", os.Getenv("THIRDSHIFT_NODE_DATA_DIR"), "node data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := noderegistration.Login(ctx, noderegistration.LoginOptions{
+		DataDir:        *dataDir,
+		CoordinatorURL: *coordinatorURL,
+		InviteToken:    *invite,
+	})
+	if err != nil {
+		return err
+	}
+	action := "refreshed"
+	if result.Registered {
+		action = "registered"
+	}
+	fmt.Fprintf(os.Stdout, "node %s: %s\n", action, result.Credentials.NodeID)
+	fmt.Fprintf(os.Stdout, "credentials: %s\n", result.Credentials.CoordinatorURL)
+	return nil
+}
+
+func runStart(args []string) error {
+	fs := flag.NewFlagSet("start", flag.ContinueOnError)
+	dataDir := fs.String("data-dir", os.Getenv("THIRDSHIFT_NODE_DATA_DIR"), "node data directory")
+	coordinatorURL := fs.String("coordinator", os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "coordinator base URL override")
+	modelID := fs.String("model", os.Getenv("THIRDSHIFT_MODEL_ID"), "model id")
+	catalogDir := fs.String("catalog-dir", "models/catalog", "model catalog directory")
+	heartbeatInterval := fs.Duration("heartbeat-interval", 15*time.Second, "heartbeat interval")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	cfg, err := nodeconfig.Load(*dataDir)
+	if err != nil {
+		return err
+	}
+	if *coordinatorURL != "" {
+		cfg.CoordinatorURL = *coordinatorURL
+	}
+	if *modelID != "" {
+		cfg.ModelID = *modelID
+	}
+	if err := nodeconfig.Save(cfg); err != nil {
+		return err
+	}
+	login, err := noderegistration.Login(ctx, noderegistration.LoginOptions{
+		DataDir:        cfg.DataDir,
+		CoordinatorURL: cfg.CoordinatorURL,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "starting node %s\n", login.Credentials.NodeID)
+	return nodeagent.Run(ctx, nodeagent.Options{
+		DataDir:           cfg.DataDir,
+		CatalogDir:        *catalogDir,
+		CoordinatorURL:    login.Credentials.CoordinatorURL,
+		ModelID:           cfg.ModelID,
+		AccessToken:       login.Credentials.AccessToken,
+		NodeID:            login.Credentials.NodeID,
+		HeartbeatInterval: *heartbeatInterval,
+		Output:            os.Stdout,
+	})
+}
+
+func runStatus(args []string) error {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	dataDir := fs.String("data-dir", os.Getenv("THIRDSHIFT_NODE_DATA_DIR"), "node data directory")
+	jsonOutput := fs.Bool("json", false, "write JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := nodeconfig.Load(*dataDir)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	response, err := control.Send(ctx, cfg.DataDir, control.Command{Action: "status"})
+	var status *control.Status
+	if err == nil {
+		status = response.Status
+	} else {
+		status, err = nodeagent.ReadStatus(cfg.DataDir)
+		if err != nil {
+			return fmt.Errorf("node is not running and no status file is available")
+		}
+	}
+	if *jsonOutput {
+		return json.NewEncoder(os.Stdout).Encode(status)
+	}
+	printStatus(status)
+	return nil
+}
+
+func runPauseResume(action string, args []string) error {
+	fs := flag.NewFlagSet(action, flag.ContinueOnError)
+	dataDir := fs.String("data-dir", os.Getenv("THIRDSHIFT_NODE_DATA_DIR"), "node data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := nodeconfig.Load(*dataDir)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	response, err := control.Send(ctx, cfg.DataDir, control.Command{Action: action})
+	if err != nil {
+		return err
+	}
+	if response.Status != nil {
+		fmt.Fprintf(os.Stdout, "state: %s\n", response.Status.State)
+	}
+	return nil
 }
 
 func runDoctor(args []string) error {
@@ -84,9 +226,52 @@ func runLocal(args []string) error {
 	})
 }
 
+func printStatus(status *control.Status) {
+	fmt.Fprintf(os.Stdout, "node id: %s\n", dash(status.NodeID))
+	fmt.Fprintf(os.Stdout, "state: %s\n", dash(status.State))
+	fmt.Fprintf(os.Stdout, "gpu: %s\n", dash(status.GPU))
+	fmt.Fprintf(os.Stdout, "model: %s\n", dash(status.ModelID))
+	fmt.Fprintf(os.Stdout, "runtime hash: %s\n", dash(status.RuntimeHash))
+	fmt.Fprintf(os.Stdout, "model hash: %s\n", dash(status.ModelHash))
+	fmt.Fprintf(os.Stdout, "schedule: %s\n", dash(status.Schedule))
+	if status.TemperatureC != nil {
+		fmt.Fprintf(os.Stdout, "temperature: %d C\n", *status.TemperatureC)
+	} else {
+		fmt.Fprintln(os.Stdout, "temperature: unavailable")
+	}
+	if status.PowerW != nil {
+		fmt.Fprintf(os.Stdout, "power: %d W\n", *status.PowerW)
+	} else {
+		fmt.Fprintln(os.Stdout, "power: unavailable")
+	}
+	connectivity := "disconnected"
+	if status.SessionConnected {
+		connectivity = "connected"
+	}
+	fmt.Fprintf(os.Stdout, "session: %s\n", connectivity)
+	if status.LastHeartbeatAt != nil {
+		fmt.Fprintf(os.Stdout, "last heartbeat: %s\n", status.LastHeartbeatAt.Format(time.RFC3339))
+	}
+	if status.LastError != "" {
+		fmt.Fprintf(os.Stdout, "last error: %s\n", status.LastError)
+	}
+}
+
+func dash(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
 func printUsage(w *os.File) {
 	fmt.Fprintf(w, "thirdshift %s\n", version.Version)
 	fmt.Fprintln(w, "usage:")
 	fmt.Fprintln(w, "  thirdshift doctor [--json]")
+	fmt.Fprintln(w, "  thirdshift login --invite <token> --coordinator <url>")
+	fmt.Fprintln(w, "  thirdshift start")
+	fmt.Fprintln(w, "  thirdshift status [--json]")
+	fmt.Fprintln(w, "  thirdshift pause")
+	fmt.Fprintln(w, "  thirdshift resume")
 	fmt.Fprintln(w, "  thirdshift run-local --model <model-id> --prompt <text>")
 }

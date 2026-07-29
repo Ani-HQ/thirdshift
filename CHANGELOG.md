@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.2 - 2026-07-29
+
+- Added invite-based node registration, local Ed25519 key storage, bootstrap exchange, and signed access-token refresh.
+- Added the persistent node WebSocket session with schema-validated `node.hello`, `session.accepted`, and `node.heartbeat` messages.
+- Added node state machine enforcement, local pause/resume/status control, heartbeat persistence, stale-session sweeping, and `admin-cli nodes list`.
+- Added Milestone 2 migration, integration test scaffold, deployment env examples, Windows verification steps, and operator runbook commands.
+
 ## 0.1.0-alpha.1 - 2026-07-29
 
 - Added `thirdshift doctor` with JSON and human output.

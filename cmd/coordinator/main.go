@@ -11,10 +11,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/anianroid/thirdshift/internal/coordinator/auth"
 	"github.com/anianroid/thirdshift/internal/coordinator/config"
 	"github.com/anianroid/thirdshift/internal/coordinator/httpapi"
+	"github.com/anianroid/thirdshift/internal/coordinator/registration"
+	"github.com/anianroid/thirdshift/internal/coordinator/sessions"
+	"github.com/anianroid/thirdshift/internal/shared/protocol"
 	"github.com/anianroid/thirdshift/internal/shared/version"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -28,22 +32,44 @@ func run() error {
 	cfg := config.Load(version.Version)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{}))
 
+	handler := httpapi.NewMux(cfg.Version)
+	var pool *pgxpool.Pool
 	if cfg.DatabaseURL != "" {
+		if cfg.AccessTokenSecret == "" {
+			return fmt.Errorf("database-backed node endpoints require THIRDSHIFT_ACCESS_TOKEN_SECRET; set a random secret for local development")
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		conn, err := pgx.Connect(ctx, cfg.DatabaseURL)
+		var err error
+		pool, err = pgxpool.New(ctx, cfg.DatabaseURL)
 		if err != nil {
-			return fmt.Errorf("database configured via %s but unreachable: %w; verify the database URL and that PostgreSQL is accepting connections", cfg.DatabaseURLSource, err)
+			return fmt.Errorf("database configured via %s but could not be parsed or pooled: %w; verify the database URL", cfg.DatabaseURLSource, err)
 		}
-		defer conn.Close(context.Background())
-		if err := conn.Ping(ctx); err != nil {
+		defer pool.Close()
+		if err := pool.Ping(ctx); err != nil {
 			return fmt.Errorf("database configured via %s but did not respond to ping: %w; verify the database URL and that PostgreSQL is accepting connections", cfg.DatabaseURLSource, err)
 		}
+		store := registration.PGStore{Pool: pool}
+		validator, err := protocolValidator()
+		if err != nil {
+			return err
+		}
+		handler = httpapi.NewMuxWithOptions(httpapi.Options{
+			Version: cfg.Version,
+			Registration: registration.Service{
+				Repository: store,
+			},
+			SessionStore:      store,
+			TokenSigner:       auth.TokenSigner{Secret: []byte(cfg.AccessTokenSecret), TTL: time.Hour},
+			ProtocolValidator: validator,
+			OperatorToken:     cfg.OperatorToken,
+			HeartbeatInterval: cfg.HeartbeatInterval,
+		})
 	}
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.NewMux(cfg.Version),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -55,6 +81,16 @@ func run() error {
 		logger.Info("coordinator listening", "addr", cfg.Addr, "version", cfg.Version)
 		errCh <- server.ListenAndServe()
 	}()
+	if pool != nil {
+		store := registration.PGStore{Pool: pool}
+		sweeper := sessions.Sweeper{Store: store, StaleAfter: cfg.SessionStaleAfter}
+		go func() {
+			err := sweeper.Run(ctx, cfg.StaleSweepInterval)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("stale session sweeper stopped", "error", err)
+			}
+		}()
+	}
 
 	select {
 	case <-ctx.Done():
@@ -71,4 +107,12 @@ func run() error {
 		}
 		return fmt.Errorf("coordinator server failed: %w", err)
 	}
+}
+
+func protocolValidator() (*protocol.Validator, error) {
+	validator, err := protocol.NewValidator("")
+	if err != nil {
+		return nil, fmt.Errorf("load protocol schemas: %w", err)
+	}
+	return validator, nil
 }
