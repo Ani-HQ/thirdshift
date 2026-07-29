@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift node.hello message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "node.hello"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node_id", "agent_version", "supported_protocol_versions", "capabilities"],
+          "properties": {
+            "node_id": {"type": "string"},
+            "agent_version": {"type": "string"},
+            "supported_protocol_versions": {
+              "type": "array",
+              "items": {"type": "string"},
+              "contains": {"const": "1.0"}
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "hostname": {"type": "string"}
+          }
+        }
+      }
+    }
+  ]
+}
+

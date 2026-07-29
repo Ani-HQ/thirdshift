@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift node.heartbeat message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "node.heartbeat"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node_id", "sequence", "state", "gpu", "active_job_id", "uptime_seconds", "timestamp"],
+          "properties": {
+            "node_id": {"type": "string"},
+            "sequence": {"type": "integer", "minimum": 0},
+            "state": {"type": "string"},
+            "model_id": {"type": "string"},
+            "runtime_hash": {"type": "string", "pattern": "^sha256:.+"},
+            "model_hash": {"type": "string", "pattern": "^sha256:.+"},
+            "gpu": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "vram_total_mb", "vram_free_mb", "temperature_c", "power_w", "power_limit_w", "utilization_percent"],
+              "properties": {
+                "name": {"type": "string"},
+                "vram_total_mb": {"type": "integer", "minimum": 0},
+                "vram_free_mb": {"type": "integer", "minimum": 0},
+                "temperature_c": {"type": "integer"},
+                "power_w": {"type": "integer", "minimum": 0},
+                "power_limit_w": {"type": "integer", "minimum": 0},
+                "utilization_percent": {"type": "integer", "minimum": 0, "maximum": 100}
+              }
+            },
+            "active_job_id": {"type": ["string", "null"]},
+            "uptime_seconds": {"type": "integer", "minimum": 0},
+            "timestamp": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

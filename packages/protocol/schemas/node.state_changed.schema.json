@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift node.state_changed message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "node.state_changed"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node_id", "previous_state", "state", "timestamp"],
+          "properties": {
+            "node_id": {"type": "string"},
+            "previous_state": {"type": "string"},
+            "state": {"type": "string"},
+            "reason": {"type": "string"},
+            "timestamp": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

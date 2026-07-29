@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift job.failed message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "job.failed"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["job_id", "attempt_id", "error_code", "message", "retryable", "failed_at"],
+          "properties": {
+            "job_id": {"type": "string"},
+            "attempt_id": {"type": "string"},
+            "error_code": {"type": "string"},
+            "message": {"type": "string"},
+            "retryable": {"type": "boolean"},
+            "failed_at": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

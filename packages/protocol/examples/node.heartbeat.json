@@ -1,0 +1,27 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M000000000000000000001",
+  "type": "node.heartbeat",
+  "sent_at": "2026-07-29T08:00:00Z",
+  "payload": {
+    "node_id": "node_01J0M000000000000000000000",
+    "sequence": 1832,
+    "state": "AVAILABLE",
+    "model_id": "thirdshift-small-chat-v1",
+    "runtime_hash": "sha256:91aa000000000000000000000000000000000000000000000000000000000000",
+    "model_hash": "sha256:6b2f000000000000000000000000000000000000000000000000000000000000",
+    "gpu": {
+      "name": "NVIDIA GeForce RTX 4070",
+      "vram_total_mb": 12282,
+      "vram_free_mb": 10400,
+      "temperature_c": 62,
+      "power_w": 146,
+      "power_limit_w": 180,
+      "utilization_percent": 4
+    },
+    "active_job_id": null,
+    "uptime_seconds": 19420,
+    "timestamp": "2026-07-29T08:00:00Z"
+  }
+}
+

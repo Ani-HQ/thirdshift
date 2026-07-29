@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift job.started message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "job.started"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["job_id", "attempt_id", "started_at"],
+          "properties": {
+            "job_id": {"type": "string"},
+            "attempt_id": {"type": "string"},
+            "started_at": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

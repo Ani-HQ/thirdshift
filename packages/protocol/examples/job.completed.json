@@ -1,0 +1,22 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M000000000000000000008",
+  "type": "job.completed",
+  "sent_at": "2026-07-29T08:00:10Z",
+  "payload": {
+    "job_id": "job_01J0M000000000000000000000",
+    "attempt_id": "att_01J0M000000000000000000000",
+    "model_id": "thirdshift-small-chat-v1",
+    "runtime_hash": "sha256:91aa000000000000000000000000000000000000000000000000000000000000",
+    "model_hash": "sha256:6b2f000000000000000000000000000000000000000000000000000000000000",
+    "usage": {
+      "prompt_tokens": 42,
+      "completion_tokens": 118,
+      "total_tokens": 160
+    },
+    "duration_millis": 1200,
+    "finish_reason": "stop",
+    "completed_at": "2026-07-29T08:00:10Z"
+  }
+}
+

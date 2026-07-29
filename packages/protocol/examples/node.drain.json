@@ -1,0 +1,11 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M00000000000000000000J",
+  "type": "node.drain",
+  "sent_at": "2026-07-29T08:00:20Z",
+  "payload": {
+    "reason": "operator_requested",
+    "drain_by": "2026-07-29T08:01:00Z"
+  }
+}
+

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift node.drain message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "node.drain"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reason"],
+          "properties": {
+            "reason": {"type": "string"},
+            "drain_by": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

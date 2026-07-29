@@ -1,0 +1,16 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M00000000000000000000A",
+  "type": "node.safety_event",
+  "sent_at": "2026-07-29T08:00:10Z",
+  "payload": {
+    "node_id": "node_01J0M000000000000000000000",
+    "event_code": "over_temperature",
+    "severity": "warning",
+    "message": "temperature exceeded configured limit",
+    "temperature_c": 82,
+    "power_w": 205,
+    "occurred_at": "2026-07-29T08:00:10Z"
+  }
+}
+

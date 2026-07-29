@@ -1,0 +1,16 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M000000000000000000003",
+  "type": "model.download_progress",
+  "sent_at": "2026-07-29T08:00:00Z",
+  "payload": {
+    "node_id": "node_01J0M000000000000000000000",
+    "model_id": "thirdshift-small-chat-v1",
+    "artifact_id": "artifact_01J0M000000000000000000000",
+    "bytes_downloaded": 524288000,
+    "bytes_total": 1048576000,
+    "percent": 50.0,
+    "timestamp": "2026-07-29T08:00:00Z"
+  }
+}
+

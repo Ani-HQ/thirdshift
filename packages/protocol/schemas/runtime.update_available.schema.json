@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift runtime.update_available message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "runtime.update_available"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runtime_id", "version", "manifest_url", "binary_sha256", "required", "available_at"],
+          "properties": {
+            "runtime_id": {"type": "string"},
+            "version": {"type": "string"},
+            "manifest_url": {"type": "string", "format": "uri"},
+            "binary_sha256": {"type": "string", "pattern": "^sha256:.+"},
+            "required": {"type": "boolean"},
+            "release_notes_url": {"type": "string", "format": "uri"},
+            "available_at": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

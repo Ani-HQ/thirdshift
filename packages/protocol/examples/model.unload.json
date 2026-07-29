@@ -1,0 +1,12 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M00000000000000000000F",
+  "type": "model.unload",
+  "sent_at": "2026-07-29T08:00:00Z",
+  "payload": {
+    "model_id": "thirdshift-small-chat-v1",
+    "reason": "operator_requested",
+    "deadline_at": "2026-07-29T08:01:00Z"
+  }
+}
+

@@ -1,0 +1,15 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M000000000000000000006",
+  "type": "job.rejected",
+  "sent_at": "2026-07-29T08:00:00Z",
+  "payload": {
+    "job_id": "job_01J0M000000000000000000000",
+    "attempt_id": "att_01J0M000000000000000000000",
+    "reason_code": "model_not_ready",
+    "message": "model is not loaded",
+    "retryable": true,
+    "rejected_at": "2026-07-29T08:00:01Z"
+  }
+}
+

@@ -1,0 +1,13 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M00000000000000000000C",
+  "type": "session.accepted",
+  "sent_at": "2026-07-29T08:00:00Z",
+  "payload": {
+    "node_id": "node_01J0M000000000000000000000",
+    "session_id": "sess_01J0M000000000000000000000",
+    "heartbeat_interval_seconds": 15,
+    "accepted_at": "2026-07-29T08:00:00Z"
+  }
+}
+

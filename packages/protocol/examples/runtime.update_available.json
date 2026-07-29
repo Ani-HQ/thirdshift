@@ -1,0 +1,16 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M00000000000000000000K",
+  "type": "runtime.update_available",
+  "sent_at": "2026-07-29T08:00:00Z",
+  "payload": {
+    "runtime_id": "runtime_01J0M000000000000000000000",
+    "version": "llama-cpp-thirdshift-2026-07-01",
+    "manifest_url": "https://releases.thirdshift.example/runtime/manifest.json",
+    "binary_sha256": "sha256:91aa000000000000000000000000000000000000000000000000000000000000",
+    "required": false,
+    "release_notes_url": "https://releases.thirdshift.example/runtime/notes",
+    "available_at": "2026-07-29T08:00:00Z"
+  }
+}
+

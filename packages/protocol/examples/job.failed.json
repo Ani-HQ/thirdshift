@@ -1,0 +1,15 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M000000000000000000009",
+  "type": "job.failed",
+  "sent_at": "2026-07-29T08:00:10Z",
+  "payload": {
+    "job_id": "job_01J0M000000000000000000000",
+    "attempt_id": "att_01J0M000000000000000000000",
+    "error_code": "runtime_error",
+    "message": "runtime exited before completion",
+    "retryable": true,
+    "failed_at": "2026-07-29T08:00:10Z"
+  }
+}
+

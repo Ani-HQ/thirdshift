@@ -1,0 +1,12 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "msg_01J0M000000000000000000007",
+  "type": "job.started",
+  "sent_at": "2026-07-29T08:00:02Z",
+  "payload": {
+    "job_id": "job_01J0M000000000000000000000",
+    "attempt_id": "att_01J0M000000000000000000000",
+    "started_at": "2026-07-29T08:00:02Z"
+  }
+}
+

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+      - name: gofmt
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "$files"
+            exit 1
+          fi
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./...
+      - name: build
+        run: go build ./...
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: thirdshift
+          POSTGRES_USER: thirdshift
+          POSTGRES_PASSWORD: thirdshift_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U thirdshift -d thirdshift"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://thirdshift:thirdshift_ci_password@localhost:5432/thirdshift?sslmode=disable
+      DATABASE_URL: postgres://thirdshift:thirdshift_ci_password@localhost:5432/thirdshift?sslmode=disable
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+      - name: Run migrations
+        run: go run ./cmd/admin-cli migrate
+      - name: Run DB-tagged tests
+        run: go test -tags db ./...
+

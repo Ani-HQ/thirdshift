@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift node.config_updated message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "node.config_updated"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["config_version", "heartbeat_interval_seconds", "max_job_seconds", "updated_at"],
+          "properties": {
+            "config_version": {"type": "string"},
+            "heartbeat_interval_seconds": {"type": "integer", "minimum": 1},
+            "max_job_seconds": {"type": "integer", "minimum": 1},
+            "updated_at": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

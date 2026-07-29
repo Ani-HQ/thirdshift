@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift model.ready message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "model.ready"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node_id", "model_id", "model_hash", "runtime_hash", "loaded_at"],
+          "properties": {
+            "node_id": {"type": "string"},
+            "model_id": {"type": "string"},
+            "model_hash": {"type": "string", "pattern": "^sha256:.+"},
+            "runtime_hash": {"type": "string", "pattern": "^sha256:.+"},
+            "loaded_at": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

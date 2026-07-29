@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift job.cancel message",
+  "allOf": [
+    {"$ref": "envelope.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "job.cancel"},
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["job_id", "reason", "cancelled_at"],
+          "properties": {
+            "job_id": {"type": "string"},
+            "attempt_id": {"type": "string"},
+            "reason": {"type": "string"},
+            "cancelled_at": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  ]
+}
+

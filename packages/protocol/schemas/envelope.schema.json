@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thirdshift protocol envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version", "message_id", "type", "sent_at", "payload"],
+  "properties": {
+    "protocol_version": {
+      "const": "1.0"
+    },
+    "message_id": {
+      "type": "string",
+      "pattern": "^msg_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "node.hello",
+        "node.heartbeat",
+        "node.state_changed",
+        "model.download_progress",
+        "model.ready",
+        "job.accepted",
+        "job.rejected",
+        "job.started",
+        "job.completed",
+        "job.failed",
+        "node.safety_event",
+        "node.log_event",
+        "session.accepted",
+        "node.config_updated",
+        "model.assign",
+        "model.unload",
+        "job.offer",
+        "job.cancel",
+        "node.drain",
+        "runtime.update_available"
+      ]
+    },
+    "sent_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object"
+    }
+  }
+}
+
