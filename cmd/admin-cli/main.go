@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -39,6 +40,8 @@ func run(args []string) error {
 		return catalog(args[1:])
 	case "invite":
 		return invite(args[1:])
+	case "fleet":
+		return fleet(args[1:])
 	case "nodes":
 		return nodes(args[1:])
 	case "credits":
@@ -214,6 +217,108 @@ func inviteCreate(args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "invite_id: %s\nfleet_id: %s\ntoken: %s\nexpires_at: %s\n", resp.InviteID, resp.FleetID, resp.Token, resp.ExpiresAt.Format(time.RFC3339))
 	return nil
+}
+
+func fleet(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("fleet command is required\n\n%s", usageText())
+	}
+	switch args[0] {
+	case "create":
+		return fleetCreate(args[1:])
+	case "report":
+		return fleetReport(args[1:])
+	default:
+		return fmt.Errorf("unknown fleet command %q\n\n%s", args[0], usageText())
+	}
+}
+
+func fleetCreate(args []string) error {
+	fs := flag.NewFlagSet("fleet create", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	orgID := fs.String("org", "", "organization id")
+	name := fs.String("name", "", "fleet name")
+	scheduleFrom := fs.String("schedule-from", "", "optional fleet default local schedule start in HH:MM")
+	scheduleUntil := fs.String("schedule-until", "", "optional fleet default local schedule end in HH:MM")
+	coordinatorURL := fs.String("coordinator", firstNonEmpty(os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "http://127.0.0.1:8080"), "coordinator base URL")
+	operatorToken := fs.String("operator-token", os.Getenv("THIRDSHIFT_OPERATOR_TOKEN"), "operator bearer token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *orgID == "" {
+		return fmt.Errorf("--org is required")
+	}
+	if *name == "" {
+		return fmt.Errorf("--name is required")
+	}
+	if *operatorToken == "" {
+		return fmt.Errorf("operator token is required; set THIRDSHIFT_OPERATOR_TOKEN or pass --operator-token")
+	}
+	var resp struct {
+		ID             string `json:"id"`
+		OrganizationID string `json:"organization_id"`
+		Name           string `json:"name"`
+		ScheduleFrom   string `json:"schedule_from"`
+		ScheduleUntil  string `json:"schedule_until"`
+	}
+	err := postAdminJSON(*coordinatorURL+"/internal/v1/fleets", *operatorToken, map[string]string{
+		"org_id":         *orgID,
+		"name":           *name,
+		"schedule_from":  *scheduleFrom,
+		"schedule_until": *scheduleUntil,
+	}, &resp)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "fleet_id: %s\norg_id: %s\nname: %s\n", resp.ID, resp.OrganizationID, resp.Name)
+	if resp.ScheduleFrom != "" || resp.ScheduleUntil != "" {
+		fmt.Fprintf(os.Stdout, "schedule: %s-%s\n", resp.ScheduleFrom, resp.ScheduleUntil)
+	}
+	return nil
+}
+
+func fleetReport(args []string) error {
+	fs := flag.NewFlagSet("fleet report", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fleetID := fs.String("fleet", "", "fleet id")
+	fromRaw := fs.String("from", "", "inclusive RFC3339 timestamp or YYYY-MM-DD date")
+	untilRaw := fs.String("to", "", "exclusive RFC3339 timestamp or YYYY-MM-DD date")
+	outPath := fs.String("out", "", "optional output CSV path; stdout when omitted")
+	coordinatorURL := fs.String("coordinator", firstNonEmpty(os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "http://127.0.0.1:8080"), "coordinator base URL")
+	operatorToken := fs.String("operator-token", os.Getenv("THIRDSHIFT_OPERATOR_TOKEN"), "operator bearer token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *fleetID == "" {
+		return fmt.Errorf("--fleet is required")
+	}
+	if *operatorToken == "" {
+		return fmt.Errorf("operator token is required; set THIRDSHIFT_OPERATOR_TOKEN or pass --operator-token")
+	}
+	endpoint := strings.TrimRight(*coordinatorURL, "/") + "/internal/v1/fleets/" + url.PathEscape(*fleetID) + "/report"
+	query := url.Values{}
+	if *fromRaw != "" {
+		query.Set("from", *fromRaw)
+	}
+	if *untilRaw != "" {
+		query.Set("to", *untilRaw)
+	}
+	if encoded := query.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+	body, err := getAdminRaw(endpoint, *operatorToken)
+	if err != nil {
+		return err
+	}
+	if *outPath != "" {
+		if err := os.WriteFile(*outPath, body, 0o600); err != nil {
+			return fmt.Errorf("write fleet report CSV: %w", err)
+		}
+		fmt.Fprintf(os.Stdout, "fleet_report: %s\n", *outPath)
+		return nil
+	}
+	_, err = os.Stdout.Write(body)
+	return err
 }
 
 func nodes(args []string) error {
@@ -541,7 +646,7 @@ func usage() error {
 }
 
 func usageText() string {
-	return "admin-cli commands:\n  migrate [--database-url URL] [--migrations-dir migrations]\n  org create --name <name> [--coordinator URL]\n  catalog sync [--catalog-dir models/catalog] [--coordinator URL]\n  apikey create --org <org_id> [--model <model_id>] [--coordinator URL]\n  invite create --fleet <fleet_id> [--coordinator URL]\n  nodes list [--coordinator URL]\n  credits release [--database-url URL]\n  payout create [--org <org_id>] [--database-url URL]\n  payout export --batch <batch_id> [--out paid.csv] [--database-url URL]\n  payout confirm --batch <batch_id> --file paid.csv [--database-url URL]\n  payout void --batch <batch_id> [--reason text] [--database-url URL]\n  report economics [--from RFC3339] [--until RFC3339] [--database-url URL]\n"
+	return "admin-cli commands:\n  migrate [--database-url URL] [--migrations-dir migrations]\n  org create --name <name> [--coordinator URL]\n  catalog sync [--catalog-dir models/catalog] [--coordinator URL]\n  apikey create --org <org_id> [--model <model_id>] [--coordinator URL]\n  invite create --fleet <fleet_id> [--coordinator URL]\n  fleet create --org <org_id> --name <name> [--schedule-from HH:MM --schedule-until HH:MM] [--coordinator URL]\n  fleet report --fleet <fleet_id> [--from RFC3339] [--to RFC3339] [--out report.csv] [--coordinator URL]\n  nodes list [--coordinator URL]\n  credits release [--database-url URL]\n  payout create [--org <org_id>] [--database-url URL]\n  payout export --batch <batch_id> [--out paid.csv] [--database-url URL]\n  payout confirm --batch <batch_id> --file paid.csv [--database-url URL]\n  payout void --batch <batch_id> [--reason text] [--database-url URL]\n  report economics [--from RFC3339] [--until RFC3339] [--database-url URL]\n"
 }
 
 type multiFlag []string
@@ -615,20 +720,32 @@ func postAdminJSON(endpoint, token string, body any, target any) error {
 }
 
 func getAdminJSON(endpoint, token string, target any) error {
-	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	body, err := getAdminRaw(endpoint, token)
 	if err != nil {
 		return err
+	}
+	return json.Unmarshal(body, target)
+}
+
+func getAdminRaw(endpoint, token string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return decodeAPIError(resp)
+		return nil, decodeAPIError(resp)
 	}
-	return json.NewDecoder(resp.Body).Decode(target)
+	body := new(bytes.Buffer)
+	if _, err := body.ReadFrom(resp.Body); err != nil {
+		return nil, err
+	}
+	return body.Bytes(), nil
 }
 
 func decodeAPIError(resp *http.Response) error {

@@ -14,6 +14,8 @@ import (
 	"github.com/anianroid/thirdshift/internal/coordinator/config"
 	"github.com/anianroid/thirdshift/internal/coordinator/httpapi"
 	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
+	"github.com/anianroid/thirdshift/internal/coordinator/ledger"
+	operatorstore "github.com/anianroid/thirdshift/internal/coordinator/operator"
 	"github.com/anianroid/thirdshift/internal/coordinator/registration"
 	"github.com/anianroid/thirdshift/internal/coordinator/sessions"
 	"github.com/anianroid/thirdshift/internal/shared/logging"
@@ -62,6 +64,13 @@ func run() error {
 			CreditHold:  cfg.CreditHold,
 			Logger:      logger,
 		}
+		operatorStore := operatorstore.Store{
+			Pool:        pool,
+			JobStore:    jobStore,
+			LedgerStore: ledger.Store{Pool: pool},
+			Alerts:      cfg.Alerts,
+			StaleAfter:  cfg.SessionStaleAfter,
+		}
 		validator, err := protocolValidator()
 		if err != nil {
 			return err
@@ -75,6 +84,7 @@ func run() error {
 			TokenSigner:       auth.TokenSigner{Secret: []byte(cfg.AccessTokenSecret), TTL: time.Hour},
 			ProtocolValidator: validator,
 			JobService:        jobService,
+			OperatorStore:     &operatorStore,
 			CatalogDir:        "models/catalog",
 			OperatorToken:     cfg.OperatorToken,
 			HeartbeatInterval: cfg.HeartbeatInterval,

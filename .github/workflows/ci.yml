@@ -55,3 +55,23 @@ jobs:
       - name: Run DB-tagged tests
         run: go test -tags db ./...
 
+  console:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/console
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: web/console/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test -- --run
+      - name: Build
+        run: npm run build

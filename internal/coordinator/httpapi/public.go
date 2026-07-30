@@ -93,6 +93,9 @@ func (o Options) catalogSyncHandler() http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if o.OperatorStore != nil {
+			_ = o.OperatorStore.RecordManifestSync(r.Context(), catalogDir, count, o.now())
+		}
 		writeJSON(w, http.StatusOK, map[string]int{"synced": count})
 	}
 }

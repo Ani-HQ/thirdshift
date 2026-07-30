@@ -240,3 +240,68 @@ go run ./cmd/admin-cli payout void --database-url "$THIRDSHIFT_DATABASE_URL" --b
 Voiding a paid batch posts a reversal transaction for the payout ledger transaction.
 
 Challenge and duplicate verification are coordinator policy paths. Integration tests cover duplicate sampling on a second node and challenge quarantine after repeated failures. A single challenge disagreement records reputation impact but does not quarantine the node.
+
+## Milestone 6 Operator Console And Fleet Drill
+
+Start the local stack with the console behind Caddy:
+
+```sh
+export THIRDSHIFT_OPERATOR_TOKEN=dev-operator-token
+export THIRDSHIFT_ACCESS_TOKEN_SECRET=dev-access-token-secret-change-me
+docker compose -f deploy/docker-compose.yml up --build
+```
+
+Open `http://127.0.0.1:8081/internal-console` and enter the operator token. The console uses `sessionStorage`; closing the tab or pressing Lock removes the in-memory session for that tab.
+
+Create an organization, fleet, catalog entries, API key, and invite:
+
+```sh
+export THIRDSHIFT_COORDINATOR_URL=http://127.0.0.1:8081
+export THIRDSHIFT_OPERATOR_TOKEN=dev-operator-token
+
+export ORG_ID="$(
+  go run ./cmd/admin-cli org create --name "Cafe Alpha" --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN" |
+  awk '/^org_id:/ {print $2}'
+)"
+
+export FLEET_ID="$(
+  go run ./cmd/admin-cli fleet create --org "$ORG_ID" --name "Cafe Alpha Floor" --schedule-from 23:00 --schedule-until 08:00 --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN" |
+  awk '/^fleet_id:/ {print $2}'
+)"
+
+go run ./cmd/admin-cli catalog sync --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+go run ./cmd/admin-cli apikey create --org "$ORG_ID" --model thirdshift-tiny-chat-v1 --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+go run ./cmd/admin-cli invite create --fleet "$FLEET_ID" --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+```
+
+After a node logs in with that invite, verify the fleet schedule default:
+
+```sh
+go run ./cmd/thirdshift status --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
+```
+
+Exercise console actions from the Nodes and Jobs pages:
+
+```sh
+curl -sS -X POST "$THIRDSHIFT_COORDINATOR_URL/internal/v1/nodes/$NODE_ID/drain" \
+  -H "Authorization: Bearer $THIRDSHIFT_OPERATOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"operator drill"}'
+
+curl -sS "$THIRDSHIFT_COORDINATOR_URL/internal/v1/audit" \
+  -H "Authorization: Bearer $THIRDSHIFT_OPERATOR_TOKEN"
+```
+
+Expected result: drain, pause, quarantine, retry, cancel, and payout actions appear in the Audit page and in `/internal/v1/audit`. Job pages never show prompt or completion bodies.
+
+Export a fleet report:
+
+```sh
+go run ./cmd/admin-cli fleet report --fleet "$FLEET_ID" --from 2026-01-01 --to 2027-01-01 --out fleet-report.csv --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+```
+
+The report columns are:
+
+```csv
+fleet_id,node_id,jobs_succeeded,jobs_failed,prompt_tokens,completion_tokens,host_credit_microdollars
+```

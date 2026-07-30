@@ -19,6 +19,8 @@ import (
 	"github.com/anianroid/thirdshift/internal/coordinator/auth"
 	"github.com/anianroid/thirdshift/internal/coordinator/httpapi"
 	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
+	"github.com/anianroid/thirdshift/internal/coordinator/ledger"
+	operatorstore "github.com/anianroid/thirdshift/internal/coordinator/operator"
 	"github.com/anianroid/thirdshift/internal/coordinator/registration"
 	nodeagent "github.com/anianroid/thirdshift/internal/node/agent"
 	"github.com/anianroid/thirdshift/internal/node/control"
@@ -279,6 +281,7 @@ type m4Env struct {
 	regStore    registration.PGStore
 	jobStore    jobs.PGStore
 	jobService  *jobs.Service
+	operator    operatorstore.Store
 	validator   *protocol.Validator
 	server      *httptest.Server
 	apiKey      string
@@ -293,6 +296,12 @@ func newM4Env(t *testing.T, logOutput io.Writer) *m4Env {
 	pool, cleanup := migratedPool(t, ctx, databaseURL)
 	regStore := registration.PGStore{Pool: pool}
 	jobStore := jobs.PGStore{Pool: pool}
+	operatorStore := operatorstore.Store{
+		Pool:        pool,
+		JobStore:    jobStore,
+		LedgerStore: ledger.Store{Pool: pool},
+		StaleAfter:  2 * time.Second,
+	}
 	logger := logging.NewTextLogger(logOutput)
 	jobService := &jobs.Service{
 		Store:       jobStore,
@@ -314,6 +323,7 @@ func newM4Env(t *testing.T, logOutput io.Writer) *m4Env {
 		TokenSigner:       auth.TokenSigner{Secret: []byte("integration-secret"), TTL: time.Hour},
 		ProtocolValidator: validator,
 		JobService:        jobService,
+		OperatorStore:     &operatorStore,
 		CatalogDir:        filepath.Join("..", "..", "models", "catalog"),
 		OperatorToken:     "operator-token",
 		HeartbeatInterval: 20 * time.Millisecond,
@@ -326,6 +336,7 @@ func newM4Env(t *testing.T, logOutput io.Writer) *m4Env {
 		regStore:   regStore,
 		jobStore:   jobStore,
 		jobService: jobService,
+		operator:   operatorStore,
 		validator:  validator,
 		server:     server,
 	}

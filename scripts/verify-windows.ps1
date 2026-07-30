@@ -199,6 +199,35 @@ if ($ok) {
     if (-not $ok) { $failed++ }
 }
 
+$ConsoleUrl = $env:THIRDSHIFT_CONSOLE_URL
+if ([string]::IsNullOrWhiteSpace($ConsoleUrl) -and -not [string]::IsNullOrWhiteSpace($CoordinatorUrl)) {
+    $ConsoleUrl = "$CoordinatorUrl/internal-console"
+}
+
+if (-not [string]::IsNullOrWhiteSpace($CoordinatorUrl) -and -not [string]::IsNullOrWhiteSpace($OperatorToken)) {
+    $ok = Run-Check "M6 operator console reachable" {
+        Invoke-WebRequest -UseBasicParsing -Uri $ConsoleUrl | Select-Object -ExpandProperty StatusCode
+    }
+    if (-not $ok) { $failed++ }
+
+    $ok = Run-Check "M6 internal overview and nodes" {
+        $Headers = @{ Authorization = "Bearer $OperatorToken" }
+        Invoke-RestMethod -Method Get -Uri "$CoordinatorUrl/internal/v1/overview" -Headers $Headers | ConvertTo-Json -Depth 8
+        Invoke-RestMethod -Method Get -Uri "$CoordinatorUrl/internal/v1/nodes" -Headers $Headers | ConvertTo-Json -Depth 8
+    }
+    if (-not $ok) { $failed++ }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:THIRDSHIFT_FLEET_ID)) {
+        $ok = Run-Check "M6 fleet report CSV" {
+            $ReportPath = Join-Path $env:TEMP "thirdshift-fleet-report.csv"
+            go run ./cmd/admin-cli fleet report --fleet $env:THIRDSHIFT_FLEET_ID --from 2026-01-01 --to 2027-01-01 --out $ReportPath --coordinator $CoordinatorUrl --operator-token $OperatorToken
+            $Rows = Import-Csv $ReportPath
+            $Rows | Format-Table
+        }
+        if (-not $ok) { $failed++ }
+    }
+}
+
 if ($failed -gt 0) {
     Write-Host "$failed check(s) failed."
     exit 1

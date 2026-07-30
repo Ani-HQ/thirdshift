@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.6 - 2026-07-30
+
+- Added the `/internal/v1` operator API for overview, nodes, models, jobs, ledger, audit, alerts, fleet creation, fleet reporting, and audited operator actions.
+- Added a Next.js TypeScript operator console under `web/console` with overview, nodes, models, jobs, ledger, and audit pages plus fast component tests.
+- Added fleet schedule defaults, fleet-scoped enrollment behavior, `admin-cli fleet create/report`, console deployment wiring, CI console build/test, and migration `000007`.
+
 ## 0.1.0-alpha.5 - 2026-07-29
 
 - Added coordinator metering plausibility checks, verification events, duplicate verification sampling, challenge reputation/quarantine updates, and verification-overhead accounting.

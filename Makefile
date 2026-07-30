@@ -1,7 +1,7 @@
 GO ?= go
 MIGRATIONS_DIR ?= migrations
 
-.PHONY: build test lint migrate dev test-slice test-integration build-windows doctor-json run-local coordinator org catalog-sync apikey fake-runtime chat-demo invite nodes credits-release payout-create payout-export payout-confirm payout-void report-economics start status configure pause resume
+.PHONY: build test lint migrate dev test-slice test-integration build-windows doctor-json run-local coordinator org catalog-sync apikey fake-runtime chat-demo invite nodes credits-release payout-create payout-export payout-confirm payout-void report-economics console-dev console-build console-test start status configure pause resume
 
 build:
 	$(GO) build ./...
@@ -75,6 +75,15 @@ payout-void:
 
 report-economics:
 	$(GO) run ./cmd/admin-cli report economics
+
+console-dev:
+	cd web/console && npm run dev
+
+console-build:
+	cd web/console && npm ci && npm run typecheck && npm run build
+
+console-test:
+	cd web/console && npm ci && npm test -- --run
 
 start:
 	$(GO) run ./cmd/thirdshift start

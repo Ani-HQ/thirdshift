@@ -1,0 +1,31 @@
+{
+  "name": "thirdshift-console",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "next": "15.5.21",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "overrides": {
+    "postcss": "8.5.18",
+    "sharp": "0.35.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.2.0",
+    "@types/node": "20.19.9",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "jsdom": "24.1.3",
+    "typescript": "5.6.3",
+    "vitest": "3.2.6"
+  }
+}

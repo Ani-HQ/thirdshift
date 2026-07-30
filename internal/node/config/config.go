@@ -119,6 +119,37 @@ func Save(cfg Config) error {
 	return nil
 }
 
+func HasScheduleOverride(dataDir string) bool {
+	if os.Getenv(envScheduleFrom) != "" || os.Getenv(envScheduleUntil) != "" {
+		return true
+	}
+	if dataDir == "" {
+		dataDir = DefaultDataDir()
+	}
+	path := filepath.Join(dataDir, "config.toml")
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, _, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "schedule_from", "schedule_until":
+			return true
+		}
+	}
+	return false
+}
+
 func parseFile(path string, cfg *Config) error {
 	file, err := os.Open(path)
 	if err != nil {

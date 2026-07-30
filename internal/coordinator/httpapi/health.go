@@ -15,6 +15,7 @@ import (
 
 	"github.com/anianroid/thirdshift/internal/coordinator/auth"
 	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
+	operatorstore "github.com/anianroid/thirdshift/internal/coordinator/operator"
 	"github.com/anianroid/thirdshift/internal/coordinator/registration"
 	nodestate "github.com/anianroid/thirdshift/internal/node/state"
 	"github.com/anianroid/thirdshift/internal/shared/ids"
@@ -35,6 +36,7 @@ type Options struct {
 	TokenSigner       auth.TokenSigner
 	ProtocolValidator *protocol.Validator
 	JobService        *jobs.Service
+	OperatorStore     *operatorstore.Store
 	CatalogDir        string
 	OperatorToken     string
 	HeartbeatInterval time.Duration
@@ -86,6 +88,25 @@ func NewMuxWithOptions(opts Options) http.Handler {
 	mux.HandleFunc("POST /internal/v1/catalog/sync", opts.operatorOnly(opts.catalogSyncHandler()))
 	mux.HandleFunc("POST /internal/v1/invites", opts.operatorOnly(opts.createInviteHandler()))
 	mux.HandleFunc("GET /internal/v1/nodes", opts.operatorOnly(opts.nodesListHandler()))
+	mux.HandleFunc("GET /internal/v1/overview", opts.operatorOnly(opts.operatorOverviewHandler()))
+	mux.HandleFunc("GET /internal/v1/alerts", opts.operatorOnly(opts.operatorAlertsHandler()))
+	mux.HandleFunc("GET /internal/v1/nodes/{node_id}", opts.operatorOnly(opts.operatorNodeDetailHandler()))
+	mux.HandleFunc("POST /internal/v1/nodes/{node_id}/drain", opts.operatorOnly(opts.operatorNodeActionHandler("drain")))
+	mux.HandleFunc("POST /internal/v1/nodes/{node_id}/pause", opts.operatorOnly(opts.operatorNodeActionHandler("pause")))
+	mux.HandleFunc("POST /internal/v1/nodes/{node_id}/quarantine", opts.operatorOnly(opts.operatorNodeActionHandler("quarantine")))
+	mux.HandleFunc("GET /internal/v1/models", opts.operatorOnly(opts.operatorModelsHandler()))
+	mux.HandleFunc("GET /internal/v1/jobs", opts.operatorOnly(opts.operatorJobsHandler()))
+	mux.HandleFunc("GET /internal/v1/jobs/{job_id}", opts.operatorOnly(opts.operatorJobDetailHandler()))
+	mux.HandleFunc("POST /internal/v1/jobs/{job_id}/retry", opts.operatorOnly(opts.operatorJobActionHandler("retry")))
+	mux.HandleFunc("POST /internal/v1/jobs/{job_id}/cancel", opts.operatorOnly(opts.operatorJobActionHandler("cancel")))
+	mux.HandleFunc("GET /internal/v1/ledger", opts.operatorOnly(opts.operatorLedgerHandler()))
+	mux.HandleFunc("POST /internal/v1/ledger/credits/release", opts.operatorOnly(opts.operatorCreditsReleaseHandler()))
+	mux.HandleFunc("POST /internal/v1/payout-batches", opts.operatorOnly(opts.operatorPayoutCreateHandler()))
+	mux.HandleFunc("GET /internal/v1/payout-batches/{batch_id}/export", opts.operatorOnly(opts.operatorPayoutExportHandler()))
+	mux.HandleFunc("POST /internal/v1/payout-batches/{batch_id}/confirm", opts.operatorOnly(opts.operatorPayoutConfirmHandler()))
+	mux.HandleFunc("GET /internal/v1/audit", opts.operatorOnly(opts.operatorAuditHandler()))
+	mux.HandleFunc("POST /internal/v1/fleets", opts.operatorOnly(opts.operatorFleetCreateHandler()))
+	mux.HandleFunc("GET /internal/v1/fleets/{fleet_id}/report", opts.operatorOnly(opts.operatorFleetReportHandler()))
 	mux.HandleFunc("GET /v1/models", opts.developerOnly(opts.modelsHandler()))
 	mux.HandleFunc("POST /v1/chat/completions", opts.developerOnly(opts.chatCompletionsHandler()))
 	mux.HandleFunc("POST /v1/jobs", opts.developerOnly(opts.createJobHandler()))
@@ -228,6 +249,15 @@ func (o Options) refreshTokenHandler() http.HandlerFunc {
 
 func (o Options) nodesListHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if o.OperatorStore != nil {
+			nodes, err := o.OperatorStore.ListNodes(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
+			return
+		}
 		if o.SessionStore == nil {
 			writeError(w, http.StatusServiceUnavailable, "node store is not configured")
 			return

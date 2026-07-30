@@ -59,9 +59,16 @@ type RegisterRequest struct {
 }
 
 type RegisterResult struct {
-	NodeID                  string    `json:"node_id"`
-	BootstrapToken          string    `json:"bootstrap_token"`
-	BootstrapTokenExpiresAt time.Time `json:"bootstrap_token_expires_at"`
+	NodeID                  string            `json:"node_id"`
+	BootstrapToken          string            `json:"bootstrap_token"`
+	BootstrapTokenExpiresAt time.Time         `json:"bootstrap_token_expires_at"`
+	FleetSchedule           *ScheduleDefaults `json:"fleet_schedule,omitempty"`
+}
+
+type ScheduleDefaults struct {
+	From     string `json:"from"`
+	Until    string `json:"until"`
+	Timezone string `json:"timezone"`
 }
 
 type NodeRegistration struct {
@@ -79,6 +86,7 @@ type NodeRegistration struct {
 type RegistrationCreated struct {
 	NodeID                  string
 	BootstrapTokenExpiresAt time.Time
+	FleetSchedule           *ScheduleDefaults
 }
 
 func (s Service) CreateInvite(ctx context.Context, fleetID string) (InviteToken, error) {
@@ -167,6 +175,7 @@ func (s Service) RegisterNode(ctx context.Context, req RegisterRequest) (Registe
 		NodeID:                  created.NodeID,
 		BootstrapToken:          bootstrapToken,
 		BootstrapTokenExpiresAt: created.BootstrapTokenExpiresAt,
+		FleetSchedule:           created.FleetSchedule,
 	}, nil
 }
 

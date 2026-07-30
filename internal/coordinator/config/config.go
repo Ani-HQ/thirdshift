@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
+	operatorstore "github.com/anianroid/thirdshift/internal/coordinator/operator"
 )
 
 const (
@@ -28,6 +29,10 @@ const (
 	envSchedulerFairness  = "THIRDSHIFT_SCHEDULER_WEIGHT_FAIRNESS"
 	envSchedulerRegion    = "THIRDSHIFT_SCHEDULER_WEIGHT_REGION"
 	envCreditHoldSeconds  = "THIRDSHIFT_CREDIT_HOLD_SECONDS"
+	envAlertDisconnects   = "THIRDSHIFT_ALERT_DISCONNECT_SPIKE_THRESHOLD"
+	envAlertFailureRate   = "THIRDSHIFT_ALERT_JOB_FAILURE_RATE"
+	envAlertRuntimeCrash  = "THIRDSHIFT_ALERT_RUNTIME_CRASH_THRESHOLD"
+	envAlertAuthAnomaly   = "THIRDSHIFT_ALERT_AUTH_ANOMALY_THRESHOLD"
 )
 
 type Config struct {
@@ -42,10 +47,12 @@ type Config struct {
 	StaleSweepInterval time.Duration
 	SchedulerWeights   jobs.SchedulerWeights
 	CreditHold         time.Duration
+	Alerts             operatorstore.AlertConfig
 }
 
 func Load(defaultVersion string) Config {
 	weights := jobs.DefaultSchedulerWeights()
+	alerts := operatorstore.DefaultAlertConfig()
 	cfg := Config{
 		Addr:               getenv(envCoordinatorAddr, defaultCoordinatorAddr),
 		Version:            getenv(envThirdshiftVersion, defaultVersion),
@@ -55,6 +62,20 @@ func Load(defaultVersion string) Config {
 		SessionStaleAfter:  durationSeconds(envStaleAfterSeconds, 45*time.Second),
 		StaleSweepInterval: durationSeconds(envSweepSeconds, 15*time.Second),
 		CreditHold:         durationSeconds(envCreditHoldSeconds, 24*time.Hour),
+		Alerts: operatorstore.AlertConfig{
+			DisconnectSpikeWindow:     alerts.DisconnectSpikeWindow,
+			DisconnectSpikeThreshold:  intEnv(envAlertDisconnects, alerts.DisconnectSpikeThreshold),
+			JobFailureWindow:          alerts.JobFailureWindow,
+			JobFailureRateThreshold:   floatEnv(envAlertFailureRate, alerts.JobFailureRateThreshold),
+			RuntimeCrashWindow:        alerts.RuntimeCrashWindow,
+			RuntimeCrashThreshold:     intEnv(envAlertRuntimeCrash, alerts.RuntimeCrashThreshold),
+			OverTempWindow:            alerts.OverTempWindow,
+			NoCapacityWindow:          alerts.NoCapacityWindow,
+			AuthAnomalyWindow:         alerts.AuthAnomalyWindow,
+			AuthAnomalyThreshold:      intEnv(envAlertAuthAnomaly, alerts.AuthAnomalyThreshold),
+			LedgerImbalanceCheck:      true,
+			NoCapacityForModelEnabled: true,
+		},
 		SchedulerWeights: jobs.SchedulerWeights{
 			WarmModelBonus:            floatEnv(envSchedulerWarm, weights.WarmModelBonus),
 			RollingSuccessRate:        floatEnv(envSchedulerSuccess, weights.RollingSuccessRate),
@@ -75,6 +96,18 @@ func Load(defaultVersion string) Config {
 	}
 
 	return cfg
+}
+
+func intEnv(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func getenv(key, fallback string) string {

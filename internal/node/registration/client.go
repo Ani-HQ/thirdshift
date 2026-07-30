@@ -37,9 +37,16 @@ type registerRequest struct {
 }
 
 type registerResponse struct {
-	NodeID                  string    `json:"node_id"`
-	BootstrapToken          string    `json:"bootstrap_token"`
-	BootstrapTokenExpiresAt time.Time `json:"bootstrap_token_expires_at"`
+	NodeID                  string         `json:"node_id"`
+	BootstrapToken          string         `json:"bootstrap_token"`
+	BootstrapTokenExpiresAt time.Time      `json:"bootstrap_token_expires_at"`
+	FleetSchedule           *fleetSchedule `json:"fleet_schedule,omitempty"`
+}
+
+type fleetSchedule struct {
+	From     string `json:"from"`
+	Until    string `json:"until"`
+	Timezone string `json:"timezone"`
 }
 
 type tokenRequest struct {
@@ -105,6 +112,12 @@ func Login(ctx context.Context, opts LoginOptions) (Result, error) {
 	})
 	if err != nil {
 		return Result{}, err
+	}
+	if registered.FleetSchedule != nil && !nodeconfig.HasScheduleOverride(cfg.DataDir) {
+		if registered.FleetSchedule.From != "" && registered.FleetSchedule.Until != "" {
+			cfg.ScheduleFrom = registered.FleetSchedule.From
+			cfg.ScheduleUntil = registered.FleetSchedule.Until
+		}
 	}
 	token, err := postJSON[tokenResponse](ctx, client, cfg.CoordinatorURL+"/v1/node/token", tokenRequest{
 		NodeID:         registered.NodeID,

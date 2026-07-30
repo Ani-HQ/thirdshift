@@ -2,6 +2,7 @@ package registration
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,13 +94,30 @@ FOR UPDATE
 	}
 
 	var organizationID string
-	if err := tx.QueryRow(ctx, "SELECT organization_id FROM fleets WHERE id = $1", fleetID).Scan(&organizationID); err != nil {
+	var scheduleFrom, scheduleUntil, scheduleTimezone sql.NullString
+	if err := tx.QueryRow(ctx, `
+SELECT organization_id, schedule_from, schedule_until, schedule_timezone
+FROM fleets
+WHERE id = $1
+`, fleetID).Scan(&organizationID, &scheduleFrom, &scheduleUntil, &scheduleTimezone); err != nil {
 		return RegistrationCreated{}, fmt.Errorf("select invite fleet: %w", err)
 	}
+	var fleetSchedule *ScheduleDefaults
+	if scheduleFrom.Valid && scheduleUntil.Valid {
+		timezone := "local"
+		if scheduleTimezone.Valid && scheduleTimezone.String != "" {
+			timezone = scheduleTimezone.String
+		}
+		fleetSchedule = &ScheduleDefaults{From: scheduleFrom.String, Until: scheduleUntil.String, Timezone: timezone}
+	}
+	nodeScheduleSource := "node"
+	if fleetSchedule != nil {
+		nodeScheduleSource = "fleet"
+	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO nodes (id, organization_id, fleet_id, state, hardware_fingerprint_hash, registered_at, created_at, updated_at)
-VALUES ($1, $2, $3, 'OFFLINE', $4, $5, $5, $5)
-`, registration.NodeID, organizationID, fleetID, registration.HardwareFingerprintHash, registration.Now); err != nil {
+INSERT INTO nodes (id, organization_id, fleet_id, state, hardware_fingerprint_hash, registered_at, schedule_from, schedule_until, schedule_source, created_at, updated_at)
+VALUES ($1, $2, $3, 'OFFLINE', $4, $5, $6, $7, $8, $5, $5)
+`, registration.NodeID, organizationID, fleetID, registration.HardwareFingerprintHash, registration.Now, nullString(scheduleFrom), nullString(scheduleUntil), nodeScheduleSource); err != nil {
 		return RegistrationCreated{}, fmt.Errorf("insert node: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -124,7 +142,7 @@ WHERE id = $1
 	if err := tx.Commit(ctx); err != nil {
 		return RegistrationCreated{}, fmt.Errorf("commit register node: %w", err)
 	}
-	return RegistrationCreated{NodeID: registration.NodeID, BootstrapTokenExpiresAt: registration.BootstrapTokenExpiresAt}, nil
+	return RegistrationCreated{NodeID: registration.NodeID, BootstrapTokenExpiresAt: registration.BootstrapTokenExpiresAt, FleetSchedule: fleetSchedule}, nil
 }
 
 func (s PGStore) ConsumeBootstrap(ctx context.Context, nodeID, bootstrapHash string, now time.Time) error {
@@ -411,4 +429,11 @@ VALUES ($1, $2, 'Thirdshift Alpha Fleet', 'active', $3, $3)
 		return "", fmt.Errorf("create fleet %s: %w", fleetID, err)
 	}
 	return organizationID, nil
+}
+
+func nullString(value sql.NullString) any {
+	if value.Valid {
+		return value.String
+	}
+	return nil
 }
