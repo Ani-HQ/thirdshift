@@ -3,10 +3,10 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 
+	"github.com/Ani-HQ/thirdshift/internal/shared/fileurl"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -85,9 +85,12 @@ func (v *Validator) schemaFor(typ MessageType) (*jsonschema.Schema, error) {
 	if err != nil {
 		return nil, fmt.Errorf("absolute schema path for %s: %w", typ, err)
 	}
-	uri := url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}
+	uri, err := fileurl.FromPath(abs)
+	if err != nil {
+		return nil, fmt.Errorf("schema file URL for %s: %w", typ, err)
+	}
 	compiler := jsonschema.NewCompiler()
-	schema, err := compiler.Compile(uri.String())
+	schema, err := compiler.Compile(uri)
 	if err != nil {
 		return nil, fmt.Errorf("compile schema for %s: %w", typ, err)
 	}
