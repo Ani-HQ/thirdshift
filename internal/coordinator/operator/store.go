@@ -302,6 +302,7 @@ type PublicModelStatus struct {
 	Capabilities                  []string                     `json:"capabilities"`
 	Price                         PublicModelPrice             `json:"price"`
 	MarketComparison              *PublicModelMarketComparison `json:"market_comparison"`
+	Attribution                   *PublicModelAttribution      `json:"attribution,omitempty"`
 	DataClass                     string                       `json:"data_class"`
 	Limits                        PublicModelLimits            `json:"limits"`
 	Availability                  PublicModelAvailability      `json:"availability"`
@@ -309,6 +310,16 @@ type PublicModelStatus struct {
 	ExpectedOutputTokensPerSecond *float64                     `json:"expected_output_tokens_per_second"`
 	Regions                       []string                     `json:"regions"`
 	Version                       string                       `json:"version"`
+}
+
+// PublicModelAttribution carries license-mandated attribution for public
+// surfaces (e.g. "Built with Llama"), present only when the catalog manifest
+// declares it.
+type PublicModelAttribution struct {
+	DisplayText string `json:"display_text"`
+	NoticeText  string `json:"notice_text,omitempty"`
+	LicenseURL  string `json:"license_url,omitempty"`
+	AUPURL      string `json:"aup_url,omitempty"`
 }
 
 // PublicModelMarketComparison carries the operator-recorded typical hosted
@@ -1018,7 +1029,11 @@ SELECT m.id, m.display_name, COALESCE(m.description, ''), m.listing_status, m.da
        m.expected_output_tokens_per_second::float8,
        COALESCE(ml.max_input_tokens, 4096),
        COALESCE(ml.max_output_tokens, 1024),
-       COALESCE(ml.capabilities, '{}'::jsonb)
+       COALESCE(ml.capabilities, '{}'::jsonb),
+       COALESCE(m.attribution_display_text, ''),
+       COALESCE(m.attribution_notice_text, ''),
+       COALESCE(m.attribution_license_url, ''),
+       COALESCE(m.attribution_aup_url, '')
 FROM models m
 JOIN LATERAL (
   SELECT * FROM model_versions WHERE model_id = m.id ORDER BY created_at DESC LIMIT 1
@@ -1041,11 +1056,13 @@ ORDER BY (m.listing_status = 'waitlist'), m.id
 		var marketInput, marketOutput *int64
 		var marketSourceNote string
 		var expectedSpeed *float64
+		var attributionDisplay, attributionNotice, attributionLicenseURL, attributionAUPURL string
 		if err := rows.Scan(
 			&model.ModelID, &model.DisplayName, &model.Description, &model.ListingStatus, &model.DataClass, &model.Version,
 			&model.Price.InputPerMillionMicrodollars, &model.Price.OutputPerMillionMicrodollars,
 			&marketInput, &marketOutput, &marketSourceNote, &expectedSpeed,
 			&model.Limits.ContextTokens, &model.Limits.MaxOutputTokens, &capabilitiesRaw,
+			&attributionDisplay, &attributionNotice, &attributionLicenseURL, &attributionAUPURL,
 		); err != nil {
 			return nil, fmt.Errorf("scan public model: %w", err)
 		}
@@ -1057,6 +1074,14 @@ ORDER BY (m.listing_status = 'waitlist'), m.id
 				TypicalInputPerMillionMicrodollars:  *marketInput,
 				TypicalOutputPerMillionMicrodollars: *marketOutput,
 				SourceNote:                          marketSourceNote,
+			}
+		}
+		if attributionDisplay != "" {
+			model.Attribution = &PublicModelAttribution{
+				DisplayText: attributionDisplay,
+				NoticeText:  attributionNotice,
+				LicenseURL:  attributionLicenseURL,
+				AUPURL:      attributionAUPURL,
 			}
 		}
 		model.Capabilities = publicCapabilities(capabilitiesRaw)

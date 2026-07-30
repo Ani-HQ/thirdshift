@@ -20,8 +20,14 @@ source:
   size_bytes: 2019377696
 license:
   identifier: llama3.2
-  reviewed_at: TODO-OPERATOR-REVIEW
-  notes: Llama 3.2 Community License reported by the pinned Hugging Face model card metadata. It is not a standard OSI license and carries acceptable-use and attribution terms, so hosted serving stays blocked until the operator signs off and sets reviewed_at. sha256 and size read from the Git LFS pointer at the pinned revision and cross-checked against the resolve endpoint x-linked-etag and x-linked-size headers.
+  reviewed_at: 2026-07-30
+  notes: Llama 3.2 Community License reviewed and signed off by the operator on 2026-07-30. Commercial hosted inference is permitted below the 700M MAU threshold. Compliance mechanisms; Built with Llama attribution on catalog surfaces, the license agreement distributed alongside the cached model on every host, and Acceptable Use Policy flow-down in the public terms. The model name retains the Llama prefix as the license requires. sha256 and size read from the Git LFS pointer at the pinned revision and cross-checked against the resolve endpoint x-linked-etag and x-linked-size headers.
+  distribute_with_model: true
+  attribution:
+    display_text: Built with Llama
+    notice_text: Llama 3.2 is licensed under the Llama 3.2 Community License
+    license_url: https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE
+    aup_url: https://www.llama.com/llama3_2/use-policy
 runtime:
   engine: llama.cpp
   build_id: llama-cpp-b10180

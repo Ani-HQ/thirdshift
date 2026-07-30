@@ -126,6 +126,32 @@ func (c Cache) downloadResumable(ctx context.Context, rawurl, dest string, expec
 	return nil
 }
 
+// EnsureLicense writes a model's license text next to its cached artifact as
+// <sha256>.LICENSE.txt. Licenses that require distribution must accompany the
+// model materials on every host, so callers treat failure as fatal to model
+// preparation.
+func (c Cache) EnsureLicense(artifactSHA256, text string) (string, error) {
+	sha := strings.TrimPrefix(artifactSHA256, "sha256:")
+	if sha == "" {
+		return "", fmt.Errorf("license artifact sha256 is required")
+	}
+	if text == "" {
+		return "", fmt.Errorf("license text is required")
+	}
+	finalPath := filepath.Join(c.Dir, sha+".LICENSE.txt")
+	if existing, err := os.ReadFile(finalPath); err == nil && string(existing) == text {
+		return finalPath, nil
+	}
+	tempPath := finalPath + ".partial"
+	if err := os.WriteFile(tempPath, []byte(text), 0o644); err != nil {
+		return "", fmt.Errorf("write model license: %w", err)
+	}
+	if err := os.Rename(tempPath, finalPath); err != nil {
+		return "", fmt.Errorf("promote model license: %w", err)
+	}
+	return finalPath, nil
+}
+
 func (c Cache) evict(activeSHA256 string) error {
 	if c.QuotaBytes <= 0 {
 		return nil

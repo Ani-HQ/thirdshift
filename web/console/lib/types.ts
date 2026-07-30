@@ -142,6 +142,13 @@ export type PublicModelListingStatus = "live" | "waitlist";
 
 export type PublicModelAvailabilityState = "available" | "limited" | "offline" | "waitlist";
 
+export type PublicModelAttribution = {
+  display_text: string;
+  notice_text?: string;
+  license_url?: string;
+  aup_url?: string;
+};
+
 export type PublicMarketComparison = {
   typical_input_per_million_microdollars: number;
   typical_output_per_million_microdollars: number;
@@ -159,6 +166,7 @@ export type PublicCatalogModel = {
     output_per_million_microdollars: number;
   };
   market_comparison: PublicMarketComparison | null;
+  attribution?: PublicModelAttribution | null;
   data_class: string;
   limits: {
     context_tokens: number;

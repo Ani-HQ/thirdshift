@@ -1,6 +1,9 @@
 package models
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const catalogDir = "../../../models/catalog"
 
@@ -179,4 +182,81 @@ func (s *sliceScanner) Text() string {
 
 func (s *sliceScanner) Err() error {
 	return nil
+}
+
+func TestManifestParsesLicenseAttributionAndDistribution(t *testing.T) {
+	manifest, err := parseManifest(&sliceScanner{lines: []string{
+		"model_id: attributed-model",
+		"display_name: Attributed Model",
+		"license:",
+		"  identifier: llama3.2",
+		"  distribute_with_model: true",
+		"  attribution:",
+		"    display_text: Built with Llama",
+		"    notice_text: Llama 3.2 is licensed under the Llama 3.2 Community License",
+		"    license_url: https://example.invalid/license",
+		"    aup_url: https://example.invalid/aup",
+		"source:",
+		"  url: https://example.invalid/model.gguf",
+		"  sha256: abc",
+	}})
+	if err != nil {
+		t.Fatalf("parse manifest with attribution: %v", err)
+	}
+	if !manifest.License.DistributeWithModel {
+		t.Fatal("distribute_with_model not parsed")
+	}
+	attribution := manifest.License.Attribution
+	if attribution == nil || attribution.DisplayText != "Built with Llama" {
+		t.Fatalf("attribution = %+v, want Built with Llama", attribution)
+	}
+	if attribution.LicenseURL != "https://example.invalid/license" || attribution.AUPURL != "https://example.invalid/aup" {
+		t.Fatalf("attribution URLs mangled: %+v", attribution)
+	}
+}
+
+func TestManifestRejectsDistributionWithoutVendoredLicense(t *testing.T) {
+	_, err := parseManifest(&sliceScanner{lines: []string{
+		"model_id: unlicensed-model",
+		"license:",
+		"  identifier: some-unknown-license",
+		"  distribute_with_model: true",
+		"source:",
+		"  url: https://example.invalid/model.gguf",
+		"  sha256: abc",
+	}})
+	if err == nil {
+		t.Fatal("distribution without vendored license text accepted")
+	}
+}
+
+func TestManifestRejectsAttributionWithoutDisplayText(t *testing.T) {
+	_, err := parseManifest(&sliceScanner{lines: []string{
+		"model_id: half-attributed-model",
+		"license:",
+		"  identifier: apache-2.0",
+		"  attribution:",
+		"    notice_text: only a notice",
+		"source:",
+		"  url: https://example.invalid/model.gguf",
+		"  sha256: abc",
+	}})
+	if err == nil {
+		t.Fatal("attribution without display_text accepted")
+	}
+}
+
+func TestVendoredLlamaLicenseTextIsTheRealAgreement(t *testing.T) {
+	text, ok := LicenseTextFor("llama3.2")
+	if !ok {
+		t.Fatal("no vendored text for llama3.2")
+	}
+	for _, marker := range []string{"LLAMA 3.2 COMMUNITY LICENSE AGREEMENT", "700 million"} {
+		if !strings.Contains(text, marker) {
+			t.Fatalf("vendored license text missing %q", marker)
+		}
+	}
+	if _, ok := LicenseTextFor("apache-2.0"); ok {
+		t.Fatal("apache-2.0 unexpectedly has vendored distribution text")
+	}
 }
