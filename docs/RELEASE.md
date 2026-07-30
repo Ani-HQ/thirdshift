@@ -12,7 +12,9 @@ openssl rand -base64 32
 
 Store the value as GitHub secret `RELEASE_SIGNING_KEY`. Set `RELEASE_SIGNING_KEY_ID` to a short operator label such as `alpha-2026-07`.
 
-The corresponding public key is embedded in `scripts/install.ps1` and `thirdshift update` as a placeholder until the first real key ceremony. When rotating keys, ship a release that trusts both old and new keys, publish the new public key in this file, then remove the old key after the next release.
+The corresponding public key is embedded in `scripts/install.ps1` and the node binary (`internal/node/runtime/manifest.go`). When rotating keys, ship a release that trusts both old and new keys, publish the new public key in this file, then remove the old key after the next release.
+
+Active key: `alpha-2026-07`, public key `/Bgu4fQntQGB6q3j18Z+du1L1/yOzU2/wNmSAQWVCMo=` (first key ceremony 2026-07-30; the seed is held offline by the operator). Runtime release manifests are re-signed with `go run ./scripts/release-manifest --resign <manifest.json> --key-id <id>` with `RELEASE_SIGNING_KEY` set.
 
 ## Tagging
 

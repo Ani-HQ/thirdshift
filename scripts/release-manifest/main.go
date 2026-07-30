@@ -31,8 +31,12 @@ func run() error {
 	outPath := flag.String("out", "dist/release-manifest.json", "manifest output path")
 	signingKey := flag.String("signing-key", os.Getenv("RELEASE_SIGNING_KEY"), "base64 Ed25519 private key or seed")
 	keyID := flag.String("key-id", os.Getenv("RELEASE_SIGNING_KEY_ID"), "release signing key id")
+	resignPath := flag.String("resign", "", "re-sign an existing manifest file in place instead of building one")
 	flag.Parse()
 
+	if *resignPath != "" {
+		return resignManifest(*resignPath, *signingKey, *keyID)
+	}
 	if *version == "" {
 		return fmt.Errorf("--version is required")
 	}
@@ -160,4 +164,44 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// resignManifest re-signs an existing manifest file (e.g. a pinned runtime
+// release manifest) in place with the given key, replacing its signature.
+func resignManifest(path, signingKey, keyID string) error {
+	if signingKey == "" {
+		return fmt.Errorf("--signing-key or RELEASE_SIGNING_KEY is required for --resign")
+	}
+	if keyID == "" {
+		return fmt.Errorf("--key-id or RELEASE_SIGNING_KEY_ID is required for --resign")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var manifest noderuntime.ReleaseManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return fmt.Errorf("parse manifest %s: %w", path, err)
+	}
+	privateKey, err := decodePrivateKey(signingKey)
+	if err != nil {
+		return err
+	}
+	manifest.Signature = noderuntime.ManifestSignature{KeyID: keyID}
+	body, err := manifest.UnsignedBytes()
+	if err != nil {
+		return err
+	}
+	manifest.Signature.Value = base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, body))
+	out, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return err
+	}
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	fmt.Printf("re-signed %s with key %s (public %s)\n", path, keyID, base64.StdEncoding.EncodeToString(publicKey))
+	return nil
 }
