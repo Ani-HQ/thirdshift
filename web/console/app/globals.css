@@ -227,6 +227,20 @@ th {
   margin-bottom: 12px;
 }
 
+.public-status {
+  max-width: 1040px;
+}
+
+.compact-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.status-note p {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
 @media (max-width: 720px) {
   .shell {
     padding: 16px;

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	nodeconfig "github.com/anianroid/thirdshift/internal/node/config"
-	"github.com/anianroid/thirdshift/internal/node/identity"
-	"github.com/anianroid/thirdshift/internal/shared/nodeauth"
+	nodeconfig "github.com/Ani-HQ/thirdshift/internal/node/config"
+	"github.com/Ani-HQ/thirdshift/internal/node/identity"
+	"github.com/Ani-HQ/thirdshift/internal/shared/nodeauth"
 )
 
 type LoginOptions struct {

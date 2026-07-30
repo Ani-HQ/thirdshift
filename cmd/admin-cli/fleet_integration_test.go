@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/database"
-	"github.com/anianroid/thirdshift/internal/coordinator/httpapi"
-	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
-	"github.com/anianroid/thirdshift/internal/coordinator/ledger"
-	operatorstore "github.com/anianroid/thirdshift/internal/coordinator/operator"
-	"github.com/anianroid/thirdshift/internal/coordinator/registration"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/database"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/httpapi"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/jobs"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/ledger"
+	operatorstore "github.com/Ani-HQ/thirdshift/internal/coordinator/operator"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/registration"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

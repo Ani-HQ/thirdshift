@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/anianroid/thirdshift/internal/node/runtime/fakellama"
+	"github.com/Ani-HQ/thirdshift/internal/node/runtime/fakellama"
 )
 
 func main() {

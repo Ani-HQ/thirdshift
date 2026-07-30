@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
-	"github.com/anianroid/thirdshift/internal/shared/ids"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/jobs"
+	"github.com/Ani-HQ/thirdshift/internal/shared/ids"
 )
 
 const chatCompletionsEndpoint = "/v1/chat/completions"

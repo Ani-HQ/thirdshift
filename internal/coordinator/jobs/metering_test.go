@@ -3,7 +3,7 @@ package jobs
 import (
 	"testing"
 
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 )
 
 func TestValidateCompletionForAcceptanceRejectsBadShape(t *testing.T) {

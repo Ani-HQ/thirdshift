@@ -21,7 +21,7 @@ services:
       dockerfile: Dockerfile
     environment:
       THIRDSHIFT_COORDINATOR_ADDR: ":8080"
-      THIRDSHIFT_VERSION: "0.1.0-alpha.0"
+      THIRDSHIFT_VERSION: "0.1.0-alpha"
       THIRDSHIFT_OPERATOR_TOKEN: "${THIRDSHIFT_OPERATOR_TOKEN:-dev-operator-token}"
       THIRDSHIFT_ACCESS_TOKEN_SECRET: "${THIRDSHIFT_ACCESS_TOKEN_SECRET:-dev-access-token-secret-change-me}"
       THIRDSHIFT_HEARTBEAT_INTERVAL_SECONDS: "${THIRDSHIFT_HEARTBEAT_INTERVAL_SECONDS:-15}"
@@ -47,7 +47,7 @@ services:
     image: node:18-alpine
     working_dir: /app
     environment:
-      NEXT_PUBLIC_BASE_PATH: "/internal-console"
+      NEXT_PUBLIC_BASE_PATH: ""
       NEXT_PUBLIC_THIRDSHIFT_API_BASE: ""
     volumes:
       - ../web/console:/app

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
-	"github.com/anianroid/thirdshift/internal/coordinator/ledger"
-	"github.com/anianroid/thirdshift/internal/shared/ids"
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/jobs"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/ledger"
+	"github.com/Ani-HQ/thirdshift/internal/shared/ids"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -244,6 +244,29 @@ type Alert struct {
 	Message   string         `json:"message"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
+}
+
+type PublicStatus struct {
+	ConnectedNodeCount        int                 `json:"connected_node_count"`
+	Cities                    []string            `json:"cities"`
+	ModelsAvailable           []ModelAvailability `json:"models_available"`
+	JobsCompleted24h          int64               `json:"jobs_completed_24h"`
+	JobsCompletedTotal        int64               `json:"jobs_completed_total"`
+	OutputTokensServed24h     int64               `json:"output_tokens_served_24h"`
+	OutputTokensServedTotal   int64               `json:"output_tokens_served_total"`
+	EstimatedGPUHoursReused   float64             `json:"estimated_gpu_hours_reused"`
+	EstimatedGPUHoursReused24 float64             `json:"estimated_gpu_hours_reused_24h"`
+	GeneratedAt               time.Time           `json:"generated_at"`
+}
+
+type ContributionCard struct {
+	NodeID                   string    `json:"node_id"`
+	NodeName                 string    `json:"node_name"`
+	NightsActive             int64     `json:"nights_active"`
+	JobsAccepted             int64     `json:"jobs_accepted"`
+	TokensServed             int64     `json:"tokens_served"`
+	CreditEarnedMicrodollars int64     `json:"credit_earned_microdollars"`
+	GeneratedAt              time.Time `json:"generated_at"`
 }
 
 type AlertCounts struct {
@@ -823,6 +846,97 @@ func BuildAlerts(counts AlertCounts, cfg AlertConfig, now time.Time) []Alert {
 		alerts = append(alerts, Alert{Code: "no_capacity", Severity: "warning", Message: "Published model has no available nodes.", Metadata: map[string]any{"model_id": modelID}, CreatedAt: now})
 	}
 	return alerts
+}
+
+func (s Store) PublicStatus(ctx context.Context, now time.Time) (PublicStatus, error) {
+	if now.IsZero() {
+		now = s.now()
+	}
+	connected, err := s.onlineNodeCount(ctx, now)
+	if err != nil {
+		return PublicStatus{}, err
+	}
+	models, err := s.ListModels(ctx)
+	if err != nil {
+		return PublicStatus{}, err
+	}
+	modelsAvailable := make([]ModelAvailability, 0, len(models))
+	for _, model := range models {
+		modelsAvailable = append(modelsAvailable, ModelAvailability{ModelID: model.ID, AvailableNodes: model.AvailableNodes})
+	}
+	var completed24h, completedTotal int64
+	if err := s.Pool.QueryRow(ctx, `
+SELECT count(*) FILTER (WHERE completed_at >= $1),
+       count(*)
+FROM jobs
+WHERE state = 'succeeded'
+`, now.Add(-24*time.Hour)).Scan(&completed24h, &completedTotal); err != nil {
+		return PublicStatus{}, fmt.Errorf("query public job counts: %w", err)
+	}
+	var output24h, outputTotal int64
+	var gpuHours24h, gpuHoursTotal float64
+	if err := s.Pool.QueryRow(ctx, `
+SELECT COALESCE(SUM(jr.completion_tokens) FILTER (WHERE jr.created_at >= $1), 0),
+       COALESCE(SUM(jr.completion_tokens), 0),
+       COALESCE(SUM(GREATEST(jr.coordinator_duration_millis, jr.duration_millis)) FILTER (WHERE jr.created_at >= $1), 0)::float8 / 3600000.0,
+       COALESCE(SUM(GREATEST(jr.coordinator_duration_millis, jr.duration_millis)), 0)::float8 / 3600000.0
+FROM job_results jr
+WHERE jr.accepted
+`, now.Add(-24*time.Hour)).Scan(&output24h, &outputTotal, &gpuHours24h, &gpuHoursTotal); err != nil {
+		return PublicStatus{}, fmt.Errorf("query public result totals: %w", err)
+	}
+	return PublicStatus{
+		ConnectedNodeCount:        connected,
+		Cities:                    []string{},
+		ModelsAvailable:           modelsAvailable,
+		JobsCompleted24h:          completed24h,
+		JobsCompletedTotal:        completedTotal,
+		OutputTokensServed24h:     output24h,
+		OutputTokensServedTotal:   outputTotal,
+		EstimatedGPUHoursReused:   gpuHoursTotal,
+		EstimatedGPUHoursReused24: gpuHours24h,
+		GeneratedAt:               now,
+	}, nil
+}
+
+func (s Store) ContributionCard(ctx context.Context, nodeID string, now time.Time) (ContributionCard, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return ContributionCard{}, fmt.Errorf("node id is required")
+	}
+	if now.IsZero() {
+		now = s.now()
+	}
+	var exists bool
+	if err := s.Pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM nodes WHERE id = $1)", nodeID).Scan(&exists); err != nil {
+		return ContributionCard{}, fmt.Errorf("lookup card node: %w", err)
+	}
+	if !exists {
+		return ContributionCard{}, fmt.Errorf("node %s not found", nodeID)
+	}
+	var card ContributionCard
+	card.NodeID = nodeID
+	card.NodeName = nodeID
+	card.GeneratedAt = now
+	if err := s.Pool.QueryRow(ctx, `
+SELECT count(DISTINCT connected_at::date)
+FROM node_sessions
+WHERE node_id = $1
+`, nodeID).Scan(&card.NightsActive); err != nil {
+		return ContributionCard{}, fmt.Errorf("query active nights: %w", err)
+	}
+	if err := s.Pool.QueryRow(ctx, `
+SELECT count(DISTINCT ja.id),
+       COALESCE(SUM(jr.prompt_tokens + jr.completion_tokens), 0),
+       COALESCE(SUM(h.amount_microdollars), 0)
+FROM job_attempts ja
+LEFT JOIN job_results jr ON jr.attempt_id = ja.id AND jr.accepted
+LEFT JOIN host_credit_holds h ON h.attempt_id = ja.id
+WHERE ja.node_id = $1 AND ja.status = 'succeeded'
+`, nodeID).Scan(&card.JobsAccepted, &card.TokensServed, &card.CreditEarnedMicrodollars); err != nil {
+		return ContributionCard{}, fmt.Errorf("query contribution card totals: %w", err)
+	}
+	return card, nil
 }
 
 func (s Store) CreateFleet(ctx context.Context, orgID, name string, schedule ScheduleDefaults, now time.Time) (Fleet, error) {

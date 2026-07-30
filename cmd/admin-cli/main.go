@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/database"
-	"github.com/anianroid/thirdshift/internal/coordinator/ledger"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/database"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/ledger"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
-	"github.com/anianroid/thirdshift/internal/coordinator/ledger"
-	"github.com/anianroid/thirdshift/internal/coordinator/registration"
-	nodeidentity "github.com/anianroid/thirdshift/internal/node/identity"
-	"github.com/anianroid/thirdshift/internal/shared/nodeauth"
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/jobs"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/ledger"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/registration"
+	nodeidentity "github.com/Ani-HQ/thirdshift/internal/node/identity"
+	"github.com/Ani-HQ/thirdshift/internal/shared/nodeauth"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 )
 
 func TestM5AcceptedJobLedgerHoldReplayAndDuplicateResult(t *testing.T) {

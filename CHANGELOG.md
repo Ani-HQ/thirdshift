@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha - 2026-07-30
+
+- Added launch readiness surfaces: signed app updater, Windows install/uninstall scripts, tag-driven release workflow, release docs, and PowerShell script checks.
+- Added unauthenticated `/v1/status`, public console `/status`, per-node contribution card JSON, and `thirdshift card`.
+- Normalized list responses to encode empty arrays instead of `null` across HTTP JSON endpoints.
+- Added README, SECURITY, CONTRIBUTING, launch checklist, and demo storyboard polish for open-source alpha readiness.
+
 ## 0.1.0-alpha.6 - 2026-07-30
 
 - Added the `/internal/v1` operator API for overview, nodes, models, jobs, ledger, audit, alerts, fleet creation, fleet reporting, and audited operator actions.

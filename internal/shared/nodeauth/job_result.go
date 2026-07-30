@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 )
 
 func SignJobCompleted(privateKey ed25519.PrivateKey, keyID string, payload protocol.JobCompletedPayload, signedAt time.Time) (protocol.NodeSignature, error) {

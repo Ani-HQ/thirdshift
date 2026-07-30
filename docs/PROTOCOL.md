@@ -110,3 +110,24 @@ Developer requests use `Authorization: Bearer <api-key>` on `/v1/models`, `/v1/c
 Milestone 6 does not add node WebSocket message types. The operator console uses HTTPS JSON endpoints under `/internal/v1` with `Authorization: Bearer <operator-token>`.
 
 Internal job responses expose job state, model, attempt counts, timings, error codes, and usage summaries. They intentionally exclude prompt bodies, completion bodies, and raw `request_metadata`.
+
+## Public Launch Status
+
+Milestone 7 does not add node WebSocket message types.
+
+`GET /v1/status` is unauthenticated and returns aggregate launch metrics only:
+
+- `connected_node_count`
+- `cities`
+- `models_available`
+- `jobs_completed_24h`
+- `jobs_completed_total`
+- `output_tokens_served_24h`
+- `output_tokens_served_total`
+- `estimated_gpu_hours_reused`
+- `estimated_gpu_hours_reused_24h`
+- `generated_at`
+
+The coordinator caches this response for 10 seconds. List fields are encoded as `[]`, never `null`.
+
+`GET /v1/nodes/{node_id}/card` returns aggregate contribution-card data for a single node: node id/name, nights active, jobs accepted, tokens served, credit earned in microdollars, and generation timestamp. It does not expose prompt bodies, completion bodies, hardware fingerprints, account references, payout records, or credentials.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/node/runtime/fakellama"
+	"github.com/Ani-HQ/thirdshift/internal/node/runtime/fakellama"
 )
 
 func TestMain(m *testing.M) {

@@ -1,4 +1,4 @@
-module github.com/anianroid/thirdshift
+module github.com/Ani-HQ/thirdshift
 
 go 1.26
 

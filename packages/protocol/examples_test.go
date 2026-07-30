@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	sharedprotocol "github.com/anianroid/thirdshift/internal/shared/protocol"
+	sharedprotocol "github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Thirdshift Console",
-  description: "Internal Thirdshift alpha operator console"
+  description: "Thirdshift alpha operator console and public network status"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

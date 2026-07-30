@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/auth"
-	"github.com/anianroid/thirdshift/internal/coordinator/httpapi"
-	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
-	"github.com/anianroid/thirdshift/internal/coordinator/registration"
-	nodeagent "github.com/anianroid/thirdshift/internal/node/agent"
-	noderegistration "github.com/anianroid/thirdshift/internal/node/registration"
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/auth"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/httpapi"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/jobs"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/registration"
+	nodeagent "github.com/Ani-HQ/thirdshift/internal/node/agent"
+	noderegistration "github.com/Ani-HQ/thirdshift/internal/node/registration"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 )
 
 func TestRoutedDeveloperRequestEndToEnd(t *testing.T) {

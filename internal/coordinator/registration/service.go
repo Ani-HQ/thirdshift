@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/shared/ids"
+	"github.com/Ani-HQ/thirdshift/internal/shared/ids"
 )
 
 var (

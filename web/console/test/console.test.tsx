@@ -1,12 +1,17 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { OverviewPanel } from "../components/OverviewPanel";
 import { NodesTable } from "../components/NodesTable";
 import { JobsTable } from "../components/JobsTable";
+import { PublicStatusPage } from "../components/PublicStatusPage";
 import { jobActionPath, nodeActionPath } from "../lib/api";
-import type { JobSummary, NodeSummary, Overview } from "../lib/types";
+import type { JobSummary, NodeSummary, Overview, PublicStatus } from "../lib/types";
 
 describe("console components", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("renders overview metrics from fixture JSON", () => {
     const overview: Overview = {
       online_nodes: 2,
@@ -58,6 +63,34 @@ describe("console components", () => {
     expect(jobActionPath(job.id, "cancel")).toBe(
       "/internal/v1/jobs/job_01J0M000000000000000000001/cancel"
     );
+  });
+
+  it("public status page renders launch metrics from fixture JSON", () => {
+    const status: PublicStatus = {
+      connected_node_count: 7,
+      cities: [],
+      models_available: [{ model_id: "thirdshift-tiny-chat-v1", available_nodes: 3 }],
+      jobs_completed_24h: 42,
+      jobs_completed_total: 420,
+      output_tokens_served_24h: 12_345,
+      output_tokens_served_total: 123_456,
+      estimated_gpu_hours_reused: 3.25,
+      estimated_gpu_hours_reused_24h: 0.75,
+      generated_at: "2026-07-30T12:00:00Z"
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => status
+      })
+    );
+    render(<PublicStatusPage initialStatus={status} />);
+    expect(screen.getByText("Thirdshift Status")).toBeInTheDocument();
+    expect(screen.getByText("Connected nodes")).toBeInTheDocument();
+    expect(screen.getByText("7")).toBeInTheDocument();
+    expect(screen.getByText("thirdshift-tiny-chat-v1")).toBeInTheDocument();
+    expect(screen.getByText("Pending alpha data")).toBeInTheDocument();
   });
 });
 

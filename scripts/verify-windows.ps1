@@ -228,6 +228,47 @@ if (-not [string]::IsNullOrWhiteSpace($CoordinatorUrl) -and -not [string]::IsNul
     }
 }
 
+if (-not [string]::IsNullOrWhiteSpace($CoordinatorUrl)) {
+    $ok = Run-Check "M7 public status API" {
+        Invoke-RestMethod -Method Get -Uri "$CoordinatorUrl/v1/status" | ConvertTo-Json -Depth 8
+    }
+    if (-not $ok) { $failed++ }
+
+    $StatusUrl = $env:THIRDSHIFT_STATUS_URL
+    if ([string]::IsNullOrWhiteSpace($StatusUrl)) {
+        $StatusUrl = "$CoordinatorUrl/status"
+    }
+    $ok = Run-Check "M7 public status page reachable" {
+        Invoke-WebRequest -UseBasicParsing -Uri $StatusUrl | Select-Object -ExpandProperty StatusCode
+    }
+    if (-not $ok) { $failed++ }
+}
+
+if (Test-Path $DataDir) {
+    $ok = Run-Check "M7 contribution card" {
+        go run ./cmd/thirdshift card --data-dir $DataDir --json
+    }
+    if (-not $ok) { $failed++ }
+}
+
+$ok = Run-Check "M7 PowerShell scripts parse" {
+    if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+        pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ps-check.ps1
+    } else {
+        powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ps-check.ps1
+    }
+}
+if (-not $ok) { $failed++ }
+
+$ReleaseManifestUrl = $env:THIRDSHIFT_RELEASE_MANIFEST_URL
+if (-not [string]::IsNullOrWhiteSpace($ReleaseManifestUrl)) {
+    $ok = Run-Check "M7 updater manifest check" {
+        thirdshift update --manifest $ReleaseManifestUrl
+        thirdshift --version
+    }
+    if (-not $ok) { $failed++ }
+}
+
 if ($failed -gt 0) {
     Write-Host "$failed check(s) failed."
     exit 1

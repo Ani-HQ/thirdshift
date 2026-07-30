@@ -57,3 +57,9 @@
 | D-052 | M6 alerts are computed from persisted coordinator state with configurable thresholds | The alpha console can surface operational risk without adding another alerting service before the pilot |
 | D-053 | Console production dependency overrides pin patched `postcss` and `sharp` transitive versions | Keeps the Node 18-compatible Next line while avoiding known production dependency advisories in the generated lockfile |
 | D-054 | Use Vitest `3.2.6` for console component tests | It is the current patched Vitest line that supports Node 18; Vitest 4 requires Node 20 or newer |
+| D-055 | Reuse the signed runtime release-manifest shape for Thirdshift app updates | One Ed25519-signed artifact manifest format keeps installer, updater, and runtime verification code paths aligned |
+| D-056 | `thirdshift update` retains the previous binary beside the active binary | Side-by-side rollback metadata is simple, cross-platform, and testable before a full Windows service updater exists |
+| D-057 | Public `/v1/status` is cached in the coordinator for 10 seconds | Launch traffic can refresh the status page frequently without adding a cache service or hitting aggregate SQL on every request |
+| D-058 | Contribution card JSON exposes only per-node aggregate stats | The share card can be public enough for launch while avoiding prompt, completion, account, payout, or hardware fingerprint data |
+| D-059 | The console app serves without a Next.js basePath; Caddy maps both `/internal-console` and `/status` | Keeps `/status` a real public route while preserving the M6 internal console URL through proxy prefix stripping |
+| D-060 | `make ps-check` uses PowerShell's parser when available and a Go structural fallback otherwise | macOS contributors can run a meaningful local check while CI still performs true PowerShell parsing on Windows |

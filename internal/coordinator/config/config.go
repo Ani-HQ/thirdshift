@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
-	operatorstore "github.com/anianroid/thirdshift/internal/coordinator/operator"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/jobs"
+	operatorstore "github.com/Ani-HQ/thirdshift/internal/coordinator/operator"
 )
 
 const (

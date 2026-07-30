@@ -305,3 +305,63 @@ The report columns are:
 ```csv
 fleet_id,node_id,jobs_succeeded,jobs_failed,prompt_tokens,completion_tokens,host_credit_microdollars
 ```
+
+## Milestone 7 Launch Readiness Drill
+
+Public status:
+
+```sh
+curl -sS http://127.0.0.1:8081/v1/status | jq .
+open http://127.0.0.1:8081/status
+```
+
+Expected result: the API and page show connected nodes, model availability, completed jobs, output tokens served, and estimated GPU-hours reused. List fields return `[]` when empty.
+
+Contribution card:
+
+```sh
+go run ./cmd/thirdshift card --data-dir "$THIRDSHIFT_NODE_DATA_DIR"
+go run ./cmd/thirdshift card --data-dir "$THIRDSHIFT_NODE_DATA_DIR" --json
+curl -sS "$THIRDSHIFT_COORDINATOR_URL/v1/nodes/$NODE_ID/card" | jq .
+```
+
+Expected result: the card shows aggregate host contribution only: node name/id, nights active, jobs accepted, tokens served, and credit earned.
+
+Windows install path:
+
+```powershell
+irm https://github.com/Ani-HQ/thirdshift/releases/latest/download/install.ps1 | iex
+thirdshift --version
+thirdshift doctor
+thirdshift login --invite $env:THIRDSHIFT_INVITE_TOKEN --coordinator $env:THIRDSHIFT_COORDINATOR_URL
+thirdshift start
+thirdshift status
+```
+
+Updater verification:
+
+```powershell
+thirdshift update --manifest https://github.com/Ani-HQ/thirdshift/releases/latest/download/release-manifest.json
+thirdshift --version
+```
+
+Uninstall:
+
+```powershell
+irm https://github.com/Ani-HQ/thirdshift/releases/latest/download/uninstall.ps1 | iex
+```
+
+Use `-PurgeData` only when intentionally removing node credentials and model cache.
+
+Release operator checklist:
+
+```sh
+make lint
+go test -count=1 ./...
+GOOS=windows GOARCH=amd64 go build ./...
+make console-build
+make console-test
+make ps-check
+```
+
+Before publishing a draft release, confirm that `release-manifest.json` has a non-empty Ed25519 signature and that `SHA256SUMS` matches every zip. Follow [docs/RELEASE.md](RELEASE.md) for key generation, signing, and user verification.

@@ -83,3 +83,14 @@ Milestone 6 adds the software surface for the invited gaming-cafe alpha.
 - The console is a small Next.js TypeScript app served under `/internal-console`; Caddy fronts the console and coordinator on one origin so the browser can call `/internal/v1` directly with the session-scoped operator token.
 - Fleet enrollment adds `admin-cli fleet create` and fleet-scoped invite defaults. Fleet schedule defaults are returned during node registration and written to node config only when the host has not already configured a local schedule.
 - `admin-cli fleet report` exports per-node jobs, tokens, and host credit CSV for alpha operations.
+
+## Launch Readiness
+
+Milestone 7 adds public launch surfaces and release packaging.
+
+- `thirdshift update` consumes the Ed25519-signed release manifest format, verifies the platform artifact hash and byte length, promotes the new binary into place, and retains the previous binary for rollback.
+- `scripts/install.ps1` installs the Windows x64 host binary under `%LOCALAPPDATA%\Thirdshift\bin`, creates the data directory, adds the bin directory to the user PATH, and runs manifest verification through the bundled updater path. `scripts/uninstall.ps1` removes binaries and can purge data/model cache with `-PurgeData`.
+- Tag pushes run `.github/workflows/release.yml`, building platform zips, `SHA256SUMS`, a signed `release-manifest.json`, and a draft GitHub release.
+- The coordinator exposes unauthenticated `/v1/status` for launch metrics. It is cached for 10 seconds and contains aggregate counts only.
+- Per-node contribution cards use `/v1/nodes/{node_id}/card` and expose only aggregate public stats: node id/name, nights active, jobs accepted, tokens served, and credit earned.
+- The console app has a public `/status` route. Caddy maps `/internal-console` to the operator console and `/status` to the public launch page on the same deployment.

@@ -121,3 +121,16 @@ export type AuditLog = {
     created_at: string;
   }>;
 };
+
+export type PublicStatus = {
+  connected_node_count: number;
+  cities: string[];
+  models_available: Array<{ model_id: string; available_nodes: number }>;
+  jobs_completed_24h: number;
+  jobs_completed_total: number;
+  output_tokens_served_24h: number;
+  output_tokens_served_total: number;
+  estimated_gpu_hours_reused: number;
+  estimated_gpu_hours_reused_24h: number;
+  generated_at: string;
+};

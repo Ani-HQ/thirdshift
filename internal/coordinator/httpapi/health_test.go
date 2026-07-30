@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/auth"
-	"github.com/anianroid/thirdshift/internal/coordinator/registration"
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/auth"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/registration"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 	"nhooyr.io/websocket"
 )
 
@@ -64,6 +65,30 @@ func TestHeartbeatIntervalSecondsClampsSubsecondIntervals(t *testing.T) {
 	}
 	if got := heartbeatIntervalSeconds(2500 * time.Millisecond); got != 3 {
 		t.Fatalf("heartbeat interval seconds = %d, want 3", got)
+	}
+}
+
+func TestWriteJSONNormalizesNilLists(t *testing.T) {
+	type nested struct {
+		Items []string `json:"items"`
+	}
+	body := struct {
+		Nodes  []registration.NodeSummary `json:"nodes"`
+		Nested nested                     `json:"nested"`
+		Raw    json.RawMessage            `json:"raw"`
+	}{
+		Raw: json.RawMessage(`{"kept":true}`),
+	}
+	recorder := httptest.NewRecorder()
+	writeJSON(recorder, http.StatusOK, body)
+	got := recorder.Body.String()
+	for _, want := range []string{`"nodes":[]`, `"items":[]`, `"raw":{"kept":true}`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("response %s missing %s", got, want)
+		}
+	}
+	if strings.Contains(got, `null`) {
+		t.Fatalf("response contains null: %s", got)
 	}
 }
 

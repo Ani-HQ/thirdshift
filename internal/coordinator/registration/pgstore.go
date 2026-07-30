@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/shared/ids"
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/shared/ids"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

@@ -3,7 +3,15 @@
 }
 
 :8081 {
-  handle /internal-console* {
+  handle /status* {
+    reverse_proxy console:3000
+  }
+
+  handle /_next* {
+    reverse_proxy console:3000
+  }
+
+  handle_path /internal-console* {
     reverse_proxy console:3000
   }
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	operatorstore "github.com/anianroid/thirdshift/internal/coordinator/operator"
+	operatorstore "github.com/Ani-HQ/thirdshift/internal/coordinator/operator"
 )
 
 type operatorActionRequest struct {

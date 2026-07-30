@@ -9,6 +9,8 @@ Thirdshift v0.1 assumes community host machines are not confidential compute. On
 - Malicious host to customer: controlled through disclosure, model and runtime hashes, challenge jobs, duplicate execution, reputation, and coordinator-delayed credit.
 - Malicious node to platform: controlled through coordinator-owned job IDs, leases, metering, pricing, idempotency, rate limits, benchmark challenges, and quarantine.
 - Malicious operator browser/session to platform: controlled in alpha by bearer-token gating, session-scoped console storage, audited actions, and never returning prompt bodies through internal job endpoints.
+- Malicious release mirror to host: controlled through release `SHA256SUMS`, signed release manifests, updater hash verification, and previous-binary rollback.
+- Public status scraping to platform: controlled by aggregate-only unauthenticated responses, 10-second caching, and no prompt/account/payout fields in status or contribution-card JSON.
 
 ## Implemented Malicious-Node Controls
 
@@ -21,6 +23,8 @@ Thirdshift v0.1 assumes community host machines are not confidential compute. On
 - Ledger postings are balanced, posted entries are immutable, and corrections use reversal transactions.
 - Operator actions for drain, pause, quarantine, retry, cancel, and payouts are written to `operator_actions`.
 - Internal job APIs return scheduler and accounting metadata only; prompt and completion text are excluded from console payloads.
+- `thirdshift update` verifies Ed25519 release manifests and artifact hashes before promoting an app binary.
+- Public contribution-card endpoints expose aggregate node contribution stats only.
 
 ## Trust Boundaries
 
@@ -29,10 +33,11 @@ Thirdshift v0.1 assumes community host machines are not confidential compute. On
 - Prompt and completion content must be absent from normal logs.
 - Ledger corrections use reversal transactions, not destructive edits to posted entries.
 - The operator console stores the bearer token in `sessionStorage` and deploys same-origin behind Caddy; durable browser storage and cross-origin internal API access remain out of scope.
+- The installer and updater trust the embedded release public key placeholder until the first real release-key ceremony. Key generation and rotation are documented in `docs/RELEASE.md`.
 
 ## Open Work
 
-- Complete signed release verification instructions.
-- Define incident response runbooks.
+- Generate and publish the real release signing public key.
+- Exercise the installer and updater on real Windows 11 x64 NVIDIA hardware.
 - Add broader adversarial tests for runtime binding, manifest tampering, and payout-operator mistakes.
 - Replace the alpha operator token with user-scoped operator identity, MFA, and scoped permissions.
