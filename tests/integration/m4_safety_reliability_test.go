@@ -103,6 +103,13 @@ func TestM4PauseResumeDrainAndThermalGuard(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("resume completion status = %d body=%s", status, string(body))
 	}
+	// The completion returns as soon as the coordinator has the result, but the
+	// node reports BUSY -> AVAILABLE asynchronously over its session. Wait for
+	// that before scheduling again, or the next request can legitimately find
+	// no eligible node.
+	waitForNodePredicate(t, env, node.nodeID, func(node registration.NodeSummary) bool {
+		return node.State == "AVAILABLE" && !node.Paused
+	})
 
 	holdDone := make(chan completionHTTPResult, 1)
 	go func() {
@@ -308,12 +315,7 @@ func newM4Env(t *testing.T, logOutput io.Writer) *m4Env {
 		Scheduler:   jobs.Scheduler{Weights: jobs.DefaultSchedulerWeights()},
 		RateLimiter: &jobs.RateLimiter{LimitPerMinute: 1000},
 		StaleAfter:  2 * time.Second,
-		// A node has to receive the offer over its WebSocket, accept it, and
-		// call its runtime before the lease expires. 250ms is inside that
-		// round trip once several test packages compete for the machine, and
-		// an expired lease fails the request outright rather than merely
-		// delaying it.
-		LeaseTTL:    5 * time.Second,
+		LeaseTTL:    250 * time.Millisecond,
 		SyncTimeout: 5 * time.Second,
 		Logger:      logger,
 	}
