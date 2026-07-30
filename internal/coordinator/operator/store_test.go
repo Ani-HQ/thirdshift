@@ -47,3 +47,28 @@ func TestEffectiveSchedulePrecedence(t *testing.T) {
 		t.Fatalf("fallback schedule = %#v", got)
 	}
 }
+
+func TestEffectiveRegionPrecedence(t *testing.T) {
+	if got := EffectiveRegion("in-south", "eu-west"); got != "in-south" {
+		t.Fatalf("node override region = %q, want in-south", got)
+	}
+	if got := EffectiveRegion("", "eu-west"); got != "eu-west" {
+		t.Fatalf("fleet fallback region = %q, want eu-west", got)
+	}
+	if got := EffectiveRegion("", ""); got != "" {
+		t.Fatalf("empty region = %q, want empty", got)
+	}
+}
+
+func TestNormalizeRegion(t *testing.T) {
+	got, err := NormalizeRegion(" IN-South ")
+	if err != nil {
+		t.Fatalf("normalize region: %v", err)
+	}
+	if got != "in-south" {
+		t.Fatalf("normalized region = %q, want in-south", got)
+	}
+	if _, err := NormalizeRegion("India South"); err == nil {
+		t.Fatal("region with spaces validated, want error")
+	}
+}

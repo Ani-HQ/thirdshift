@@ -31,19 +31,21 @@ type HealthResponse struct {
 }
 
 type Options struct {
-	Version           string
-	Registration      registration.Service
-	SessionStore      SessionStore
-	TokenSigner       auth.TokenSigner
-	ProtocolValidator *protocol.Validator
-	JobService        *jobs.Service
-	OperatorStore     *operatorstore.Store
-	CatalogDir        string
-	OperatorToken     string
-	HeartbeatInterval time.Duration
-	StatusCacheTTL    time.Duration
-	Now               func() time.Time
-	Logger            *slog.Logger
+	Version                string
+	Registration           registration.Service
+	SessionStore           SessionStore
+	TokenSigner            auth.TokenSigner
+	ProtocolValidator      *protocol.Validator
+	JobService             *jobs.Service
+	OperatorStore          *operatorstore.Store
+	CatalogDir             string
+	OperatorToken          string
+	HeartbeatInterval      time.Duration
+	StatusCacheTTL         time.Duration
+	RequesterRegionHeader  string
+	WaitlistLimitPerMinute int
+	Now                    func() time.Time
+	Logger                 *slog.Logger
 }
 
 type SessionStore interface {
@@ -85,12 +87,22 @@ func NewMuxWithOptions(opts Options) http.Handler {
 	if opts.StatusCacheTTL <= 0 {
 		opts.StatusCacheTTL = 10 * time.Second
 	}
+	if opts.RequesterRegionHeader == "" {
+		opts.RequesterRegionHeader = "X-Geo-Region"
+	}
+	if opts.WaitlistLimitPerMinute <= 0 {
+		opts.WaitlistLimitPerMinute = 5
+	}
 
 	mux := http.NewServeMux()
 	statusCache := &publicStatusCache{}
+	waitlistLimiter := newWaitlistRateLimiter(opts.WaitlistLimitPerMinute, time.Minute, opts.now)
 	mux.HandleFunc("GET /healthz", healthHandler(opts.Version))
-	mux.HandleFunc("GET /v1/status", opts.publicStatusHandler(statusCache))
-	mux.HandleFunc("GET /v1/nodes/{node_id}/card", opts.publicNodeCardHandler())
+	mux.HandleFunc("GET /v1/status", publicCORS(opts.publicStatusHandler(statusCache)))
+	mux.HandleFunc("POST /v1/waitlist", publicCORS(opts.waitlistSignupHandler(waitlistLimiter)))
+	mux.HandleFunc("OPTIONS /v1/status", publicCORSPreflight)
+	mux.HandleFunc("OPTIONS /v1/waitlist", publicCORSPreflight)
+	mux.HandleFunc("GET /v1/nodes/{node_id}/card", publicCORS(opts.publicNodeCardHandler()))
 	mux.HandleFunc("POST /internal/v1/orgs", opts.operatorOnly(opts.createOrgHandler()))
 	mux.HandleFunc("POST /internal/v1/api-keys", opts.operatorOnly(opts.createAPIKeyHandler()))
 	mux.HandleFunc("POST /internal/v1/catalog/sync", opts.operatorOnly(opts.catalogSyncHandler()))
@@ -114,7 +126,11 @@ func NewMuxWithOptions(opts Options) http.Handler {
 	mux.HandleFunc("POST /internal/v1/payout-batches/{batch_id}/confirm", opts.operatorOnly(opts.operatorPayoutConfirmHandler()))
 	mux.HandleFunc("GET /internal/v1/audit", opts.operatorOnly(opts.operatorAuditHandler()))
 	mux.HandleFunc("POST /internal/v1/fleets", opts.operatorOnly(opts.operatorFleetCreateHandler()))
+	mux.HandleFunc("POST /internal/v1/fleets/{fleet_id}/region", opts.operatorOnly(opts.operatorFleetRegionHandler()))
 	mux.HandleFunc("GET /internal/v1/fleets/{fleet_id}/report", opts.operatorOnly(opts.operatorFleetReportHandler()))
+	mux.HandleFunc("POST /internal/v1/nodes/{node_id}/region", opts.operatorOnly(opts.operatorNodeRegionHandler()))
+	mux.HandleFunc("GET /internal/v1/waitlist", opts.operatorOnly(opts.operatorWaitlistHandler()))
+	mux.HandleFunc("GET /internal/v1/waitlist/export", opts.operatorOnly(opts.operatorWaitlistExportHandler()))
 	mux.HandleFunc("GET /v1/models", opts.developerOnly(opts.modelsHandler()))
 	mux.HandleFunc("POST /v1/chat/completions", opts.developerOnly(opts.chatCompletionsHandler()))
 	mux.HandleFunc("POST /v1/jobs", opts.developerOnly(opts.createJobHandler()))
@@ -605,4 +621,22 @@ func normalizeNilSlices(value reflect.Value) reflect.Value {
 	default:
 		return value
 	}
+}
+
+// publicCORS wraps unauthenticated public endpoints so browser pages on any
+// origin (status embeds, marketing sites) can read them. Never apply this to
+// authenticated or internal routes.
+func publicCORS(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		next(w, r)
+	}
+}
+
+func publicCORSPreflight(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Max-Age", "86400")
+	w.WriteHeader(http.StatusNoContent)
 }

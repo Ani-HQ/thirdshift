@@ -18,12 +18,15 @@ func (o Options) publicStatusHandler(cache *publicStatusCache) http.HandlerFunc 
 	return func(w http.ResponseWriter, r *http.Request) {
 		now := o.now()
 		if cached, ok := cache.get(now); ok {
+			cached.RequesterRegion = o.requesterRegion(r)
 			writeJSON(w, http.StatusOK, cached)
 			return
 		}
 		status := operatorstore.PublicStatus{
 			Cities:          []string{},
 			ModelsAvailable: []operatorstore.ModelAvailability{},
+			Models:          []operatorstore.PublicModelStatus{},
+			RegionsOnline:   []string{},
 			GeneratedAt:     now,
 		}
 		if o.OperatorStore != nil {
@@ -35,6 +38,7 @@ func (o Options) publicStatusHandler(cache *publicStatusCache) http.HandlerFunc 
 			status = next
 		}
 		cache.set(status, now.Add(o.StatusCacheTTL))
+		status.RequesterRegion = o.requesterRegion(r)
 		writeJSON(w, http.StatusOK, status)
 	}
 }

@@ -183,14 +183,15 @@ func (s PGStore) upsertManifest(ctx context.Context, manifest models.Manifest, m
 		dataClass = "public_or_non_sensitive"
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO models (id, display_name, status, data_class, created_at, updated_at)
-VALUES ($1, $2, $3, $4, now(), now())
+INSERT INTO models (id, display_name, description, status, data_class, created_at, updated_at)
+VALUES ($1, $2, NULLIF($3, ''), $4, $5, now(), now())
 ON CONFLICT (id) DO UPDATE
 SET display_name = EXCLUDED.display_name,
+    description = EXCLUDED.description,
     status = EXCLUDED.status,
     data_class = EXCLUDED.data_class,
     updated_at = now()
-`, manifest.ModelID, manifest.DisplayName, manifest.Status, dataClass); err != nil {
+`, manifest.ModelID, manifest.DisplayName, manifest.Description, manifest.Status, dataClass); err != nil {
 		return fmt.Errorf("upsert model: %w", err)
 	}
 

@@ -365,3 +365,47 @@ make ps-check
 ```
 
 Before publishing a draft release, confirm that `release-manifest.json` has a non-empty Ed25519 signature and that `SHA256SUMS` matches every zip. Follow [docs/RELEASE.md](RELEASE.md) for key generation, signing, and user verification.
+
+## Public Catalog And Waitlist Drill
+
+Set aggregate regions:
+
+```sh
+export THIRDSHIFT_COORDINATOR_URL=http://127.0.0.1:8081
+export THIRDSHIFT_OPERATOR_TOKEN=dev-operator-token
+
+go run ./cmd/admin-cli fleet set-region --fleet "$FLEET_ID" --region in-south --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+go run ./cmd/admin-cli node set-region --node "$NODE_ID" --region eu-west --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+```
+
+Node region overrides fleet region. Clear an override by passing an empty region value.
+
+Preview the public catalog without Docker or Caddy:
+
+```sh
+THIRDSHIFT_OPERATOR_TOKEN=dev-operator-token THIRDSHIFT_ACCESS_TOKEN_SECRET=dev-access-token-secret-change-me THIRDSHIFT_DATABASE_URL="$THIRDSHIFT_DATABASE_URL" go run ./cmd/coordinator
+```
+
+In a second shell:
+
+```sh
+cd web/console && THIRDSHIFT_COORDINATOR_URL=http://127.0.0.1:8080 npm run dev
+```
+
+Open `http://127.0.0.1:3000/status`. The Next dev server proxies `/v1/*` to the coordinator when `THIRDSHIFT_COORDINATOR_URL` is set.
+
+Check the public API directly:
+
+```sh
+curl -sS -H 'X-Geo-Region: in-south' http://127.0.0.1:8080/v1/status | jq .
+curl -sS -X POST http://127.0.0.1:8080/v1/waitlist \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"dev@example.com","use_case":"alpha model eval"}' | jq .
+```
+
+Read and export the waitlist:
+
+```sh
+go run ./cmd/admin-cli waitlist list --coordinator http://127.0.0.1:8080 --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+go run ./cmd/admin-cli waitlist export --out waitlist.csv --coordinator http://127.0.0.1:8080 --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+```

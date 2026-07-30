@@ -126,6 +126,9 @@ export type PublicStatus = {
   connected_node_count: number;
   cities: string[];
   models_available: Array<{ model_id: string; available_nodes: number }>;
+  models: PublicCatalogModel[];
+  regions_online: string[];
+  requester_region: string | null;
   jobs_completed_24h: number;
   jobs_completed_total: number;
   output_tokens_served_24h: number;
@@ -133,4 +136,27 @@ export type PublicStatus = {
   estimated_gpu_hours_reused: number;
   estimated_gpu_hours_reused_24h: number;
   generated_at: string;
+};
+
+export type PublicCatalogModel = {
+  model_id: string;
+  display_name: string;
+  description: string;
+  capabilities: string[];
+  price: {
+    input_per_million_microdollars: number;
+    output_per_million_microdollars: number;
+  };
+  data_class: string;
+  limits: {
+    context_tokens: number;
+    max_output_tokens: number;
+  };
+  availability: {
+    available_nodes: number;
+    state: "available" | "limited" | "offline";
+  };
+  typical_output_tokens_per_second: number | null;
+  regions: string[];
+  version: string;
 };

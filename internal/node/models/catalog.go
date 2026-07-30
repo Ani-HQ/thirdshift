@@ -13,6 +13,7 @@ type Manifest struct {
 	SchemaVersion int
 	ModelID       string
 	DisplayName   string
+	Description   string
 	Status        string
 	Source        Source
 	License       License
@@ -197,6 +198,8 @@ func assignTopLevel(manifest *Manifest, key, value string) error {
 		manifest.ModelID = value
 	case "display_name":
 		manifest.DisplayName = value
+	case "description":
+		manifest.Description = value
 	case "status":
 		manifest.Status = value
 	}

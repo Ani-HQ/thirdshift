@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added public model catalog data to `/v1/status`: model cards, public prices, limits, aggregate availability state, regions, requester-region hint, and 24-hour median output speed.
+- Added fleet/node aggregate region fields and operator commands for region assignment without exposing host or per-node details publicly.
+- Added unauthenticated developer waitlist signup plus operator waitlist list/export commands.
+- Reworked the public console `/status` route into a model-first catalog and network status page with waitlist capture.
+
 ## 0.1.0-alpha - 2026-07-30
 
 - Added launch readiness surfaces: signed app updater, Windows install/uninstall scripts, tag-driven release workflow, release docs, and PowerShell script checks.

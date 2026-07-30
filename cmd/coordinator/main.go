@@ -80,15 +80,16 @@ func run() error {
 			Registration: registration.Service{
 				Repository: store,
 			},
-			SessionStore:      store,
-			TokenSigner:       auth.TokenSigner{Secret: []byte(cfg.AccessTokenSecret), TTL: time.Hour},
-			ProtocolValidator: validator,
-			JobService:        jobService,
-			OperatorStore:     &operatorStore,
-			CatalogDir:        "models/catalog",
-			OperatorToken:     cfg.OperatorToken,
-			HeartbeatInterval: cfg.HeartbeatInterval,
-			Logger:            logger,
+			SessionStore:          store,
+			TokenSigner:           auth.TokenSigner{Secret: []byte(cfg.AccessTokenSecret), TTL: time.Hour},
+			ProtocolValidator:     validator,
+			JobService:            jobService,
+			OperatorStore:         &operatorStore,
+			CatalogDir:            "models/catalog",
+			OperatorToken:         cfg.OperatorToken,
+			HeartbeatInterval:     cfg.HeartbeatInterval,
+			RequesterRegionHeader: cfg.RequesterRegionHeader,
+			Logger:                logger,
 		})
 	}
 
