@@ -179,7 +179,7 @@ describe("console components", () => {
     const status = publicStatusFixture({ models: [waitlistModelFixture()] });
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       if (String(url).endsWith("/v1/waitlist") && init?.method === "POST") {
-        return Promise.resolve({ ok: true, json: async () => ({ status: "ok", duplicate: false }) });
+        return Promise.resolve({ ok: true, json: async () => ({ status: "ok" }) });
       }
       return Promise.resolve({ ok: true, json: async () => status });
     });
@@ -215,11 +215,11 @@ describe("console components", () => {
     });
   });
 
-  it("answers a repeat address exactly like a new one", async () => {
+  it("answers a resubmission exactly like a first application", async () => {
     const status = publicStatusFixture({ models: [waitlistModelFixture()] });
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       if (String(url).endsWith("/v1/waitlist") && init?.method === "POST") {
-        return Promise.resolve({ ok: true, json: async () => ({ status: "ok", duplicate: true }) });
+        return Promise.resolve({ ok: true, json: async () => ({ status: "ok" }) });
       }
       return Promise.resolve({ ok: true, json: async () => status });
     });

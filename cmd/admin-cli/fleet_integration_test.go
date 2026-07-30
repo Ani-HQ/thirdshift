@@ -99,9 +99,11 @@ VALUES ($1, $2, $3, 'OFFLINE', now(), now())
 	if nodeRegion != "us-west" {
 		t.Fatalf("node region = %q, want us-west", nodeRegion)
 	}
+	// One applicant, two models: the CLI must list both rows, not collapse them.
 	if _, err := pool.Exec(ctx, `
-INSERT INTO waitlist_signups (id, email, name, use_case, expected_volume, data_ack, model_id, source, created_at)
-VALUES ('wait_01K0M000000000000000000010', 'cli@example.com', 'CLI Applicant', 'CLI export', '10m_100m', true, 'qwen2.5-7b-instruct', 'test', now())
+INSERT INTO waitlist_signups (id, email, name, use_case, expected_volume, data_ack, model_id, source, created_at, last_applied_at)
+VALUES ('wait_01K0M000000000000000000010', 'cli@example.com', 'CLI Applicant', 'CLI export', '10m_100m', true, 'qwen2.5-7b-instruct', 'test', now(), now()),
+       ('wait_01K0M000000000000000000011', 'cli@example.com', 'CLI Applicant', 'CLI coder export', 'lt_1m', true, 'qwen2.5-coder-7b-instruct', 'test', now(), now())
 `); err != nil {
 		t.Fatalf("seed waitlist: %v", err)
 	}
@@ -118,13 +120,20 @@ VALUES ('wait_01K0M000000000000000000010', 'cli@example.com', 'CLI Applicant', '
 	if err != nil {
 		t.Fatalf("parse waitlist csv: %v", err)
 	}
-	if len(waitlistRecords) < 2 ||
-		strings.Join(waitlistRecords[0], ",") != "id,email,name,use_case,expected_volume,data_ack,model_id,source,created_at" {
-		t.Fatalf("unexpected waitlist header: %#v", waitlistRecords)
+	if len(waitlistRecords) != 3 ||
+		strings.Join(waitlistRecords[0], ",") != "id,email,name,use_case,expected_volume,data_ack,model_id,source,created_at,last_applied_at" {
+		t.Fatalf("unexpected waitlist header or row count: %#v", waitlistRecords)
 	}
-	if got := strings.Join(waitlistRecords[1][:7], ","); got !=
-		"wait_01K0M000000000000000000010,cli@example.com,CLI Applicant,CLI export,10m_100m,true,qwen2.5-7b-instruct" {
-		t.Fatalf("unexpected waitlist row: %q", got)
+	exportedModels := map[string]string{}
+	for _, record := range waitlistRecords[1:] {
+		if record[1] != "cli@example.com" {
+			t.Fatalf("unexpected waitlist email in export: %q", record[1])
+		}
+		exportedModels[record[6]] = record[3]
+	}
+	if exportedModels["qwen2.5-7b-instruct"] != "CLI export" ||
+		exportedModels["qwen2.5-coder-7b-instruct"] != "CLI coder export" {
+		t.Fatalf("export did not carry both applications: %#v", exportedModels)
 	}
 	if err := run([]string{"waitlist", "list", "--coordinator", server.URL, "--operator-token", "operator-token"}); err != nil {
 		t.Fatalf("waitlist list command: %v", err)

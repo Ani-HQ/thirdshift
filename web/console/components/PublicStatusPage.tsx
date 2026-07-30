@@ -85,7 +85,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
     setApplicationState("submitting");
     setApplicationMessage("");
     try {
-      await publicPost<{ status: string; duplicate: boolean }>("/v1/waitlist", {
+      await publicPost<{ status: string }>("/v1/waitlist", {
         email: trimmedEmail,
         name: name.trim(),
         use_case: trimmedUseCase,
@@ -93,8 +93,9 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
         data_ack: dataAck,
         model_id: activeModel || ""
       });
-      // A repeat address gets the same answer as a new one: the applicant
-      // learns their request is in, and nobody learns who else applied.
+      // A resubmission overwrites the previous answers server-side and gets
+      // the same response as a first application, so nobody can use this form
+      // to learn which addresses have already applied.
       setApplicationState("received");
       setApplicationMessage(receivedText);
     } catch (err) {

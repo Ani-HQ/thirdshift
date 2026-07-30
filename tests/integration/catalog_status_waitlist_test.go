@@ -160,7 +160,7 @@ func TestPublicAccessApplicationRequiresUseCaseAndAcknowledgment(t *testing.T) {
 	postWaitlistRaw(t, env, []byte(`{"email":"not-an-email","use_case":"Batch summaries","data_ack":true}`), http.StatusBadRequest)
 	postWaitlistRaw(t, env, []byte(`{"email":"dev@example.com","use_case":"Batch summaries","data_ack":true,"expected_volume":"loads"}`), http.StatusBadRequest)
 
-	created := postApplication(t, env, accessApplication{
+	postApplication(t, env, accessApplication{
 		Email:          "dev@example.com",
 		Name:           "Dev Example",
 		UseCase:        "Nightly batch summaries for an internal tool",
@@ -168,18 +168,135 @@ func TestPublicAccessApplicationRequiresUseCaseAndAcknowledgment(t *testing.T) {
 		DataAck:        true,
 		ModelID:        "qwen2.5-7b-instruct",
 	}, http.StatusOK)
-	if created.Duplicate {
-		t.Fatal("first application reported duplicate")
+
+	signups := listApplications(t, env)
+	if len(signups) != 1 {
+		t.Fatalf("waitlist rows = %d, want 1", len(signups))
 	}
-	repeat := postApplication(t, env, accessApplication{
-		Email:   "DEV@example.com",
-		UseCase: "Same developer applying again",
-		DataAck: true,
-	}, http.StatusOK)
-	if !repeat.Duplicate {
-		t.Fatal("repeat application did not report duplicate")
+	signup := signups[0]
+	if signup.Email != "dev@example.com" || signup.Name != "Dev Example" ||
+		signup.UseCase != "Nightly batch summaries for an internal tool" ||
+		signup.ExpectedVolume != "1m_10m" || !signup.DataAck || signup.ModelID != "qwen2.5-7b-instruct" {
+		t.Fatalf("stored application = %#v", signup)
+	}
+	if signup.LastAppliedAt.IsZero() {
+		t.Fatal("last_applied_at was not recorded")
 	}
 
+	exported := operatorGetRaw(t, env, "/internal/v1/waitlist/export", "operator-token")
+	if exported.status != http.StatusOK {
+		t.Fatalf("waitlist export status=%d body=%s", exported.status, string(exported.body))
+	}
+	csvBody := string(exported.body)
+	if !strings.HasPrefix(csvBody, "id,email,name,use_case,expected_volume,data_ack,model_id,source,created_at,last_applied_at") {
+		t.Fatalf("waitlist CSV header = %q", csvBody)
+	}
+	for _, want := range []string{"Dev Example", "1m_10m", "true", "qwen2.5-7b-instruct"} {
+		if !strings.Contains(csvBody, want) {
+			t.Fatalf("waitlist CSV missing %q: %s", want, csvBody)
+		}
+	}
+}
+
+// A returning applicant with better answers must overwrite their previous
+// application rather than be silently dropped, and applying for a second model
+// must not overwrite the first.
+func TestPublicApplicationUpsertsPerEmailAndModel(t *testing.T) {
+	env := newM4Env(t, ioDiscard{})
+	defer env.close()
+
+	postApplication(t, env, accessApplication{
+		Email:          "dev@example.com",
+		Name:           "Dev",
+		UseCase:        "First pass, vague",
+		ExpectedVolume: "lt_1m",
+		DataAck:        true,
+		ModelID:        "qwen2.5-7b-instruct",
+	}, http.StatusOK)
+	first := requireApplication(t, listApplications(t, env), "dev@example.com", "qwen2.5-7b-instruct")
+
+	// Same email and model, better answers, and a mixed-case address to prove
+	// normalization still lands on the same row.
+	postApplication(t, env, accessApplication{
+		Email:          "DEV@example.com",
+		Name:           "Dev Example",
+		UseCase:        "Revised: nightly evaluation harness",
+		ExpectedVolume: "10m_100m",
+		DataAck:        true,
+		ModelID:        "qwen2.5-7b-instruct",
+	}, http.StatusOK)
+
+	signups := listApplications(t, env)
+	if len(signups) != 1 {
+		t.Fatalf("re-application created %d rows, want 1: %#v", len(signups), signups)
+	}
+	updated := requireApplication(t, signups, "dev@example.com", "qwen2.5-7b-instruct")
+	if updated.ID != first.ID {
+		t.Fatalf("re-application replaced the row id %s with %s", first.ID, updated.ID)
+	}
+	if updated.Name != "Dev Example" || updated.UseCase != "Revised: nightly evaluation harness" || updated.ExpectedVolume != "10m_100m" {
+		t.Fatalf("re-application did not overwrite the answers: %#v", updated)
+	}
+	if !updated.CreatedAt.Equal(first.CreatedAt) {
+		t.Fatalf("created_at moved from %s to %s", first.CreatedAt, updated.CreatedAt)
+	}
+	if !updated.LastAppliedAt.After(first.LastAppliedAt) {
+		t.Fatalf("last_applied_at did not advance: %s then %s", first.LastAppliedAt, updated.LastAppliedAt)
+	}
+
+	// A second model is a separate application, not an overwrite.
+	postApplication(t, env, accessApplication{
+		Email:   "dev@example.com",
+		UseCase: "Coder model for refactors",
+		DataAck: true,
+		ModelID: "qwen2.5-coder-7b-instruct",
+	}, http.StatusOK)
+	signups = listApplications(t, env)
+	if len(signups) != 2 {
+		t.Fatalf("second model produced %d rows, want 2: %#v", len(signups), signups)
+	}
+	kept := requireApplication(t, signups, "dev@example.com", "qwen2.5-7b-instruct")
+	if kept.UseCase != "Revised: nightly evaluation harness" {
+		t.Fatalf("applying for a second model overwrote the first: %#v", kept)
+	}
+	coder := requireApplication(t, signups, "dev@example.com", "qwen2.5-coder-7b-instruct")
+	if coder.UseCase != "Coder model for refactors" {
+		t.Fatalf("second model application = %#v", coder)
+	}
+}
+
+// An application with no model named is that applicant's general application.
+// Uniqueness is NULLS NOT DISTINCT so resubmitting updates it rather than
+// piling up a new row every time.
+func TestPublicGeneralApplicationUpsertsWithoutModel(t *testing.T) {
+	env := newM4Env(t, ioDiscard{})
+	defer env.close()
+
+	postApplication(t, env, accessApplication{
+		Email:   "dev@example.com",
+		UseCase: "Exploring the platform",
+		DataAck: true,
+	}, http.StatusOK)
+	postApplication(t, env, accessApplication{
+		Email:   "dev@example.com",
+		UseCase: "Revised: exploring with a real workload",
+		DataAck: true,
+	}, http.StatusOK)
+
+	signups := listApplications(t, env)
+	if len(signups) != 1 {
+		t.Fatalf("general re-application created %d rows, want 1: %#v", len(signups), signups)
+	}
+	if signups[0].ModelID != "" {
+		t.Fatalf("general application recorded model %q", signups[0].ModelID)
+	}
+	if signups[0].UseCase != "Revised: exploring with a real workload" {
+		t.Fatalf("general re-application did not overwrite: %#v", signups[0])
+	}
+}
+
+func listApplications(t *testing.T, env *m4Env) []operatorstore.WaitlistSignup {
+	t.Helper()
 	listed := operatorGetRaw(t, env, "/internal/v1/waitlist", "operator-token")
 	if listed.status != http.StatusOK {
 		t.Fatalf("waitlist list status=%d body=%s", listed.status, string(listed.body))
@@ -190,29 +307,18 @@ func TestPublicAccessApplicationRequiresUseCaseAndAcknowledgment(t *testing.T) {
 	if err := json.Unmarshal(listed.body, &listResponse); err != nil {
 		t.Fatalf("decode waitlist list: %v", err)
 	}
-	if len(listResponse.Signups) != 1 {
-		t.Fatalf("waitlist rows = %d, want 1", len(listResponse.Signups))
-	}
-	signup := listResponse.Signups[0]
-	if signup.Email != "dev@example.com" || signup.Name != "Dev Example" ||
-		signup.UseCase != "Nightly batch summaries for an internal tool" ||
-		signup.ExpectedVolume != "1m_10m" || !signup.DataAck || signup.ModelID != "qwen2.5-7b-instruct" {
-		t.Fatalf("stored application = %#v", signup)
-	}
+	return listResponse.Signups
+}
 
-	exported := operatorGetRaw(t, env, "/internal/v1/waitlist/export", "operator-token")
-	if exported.status != http.StatusOK {
-		t.Fatalf("waitlist export status=%d body=%s", exported.status, string(exported.body))
-	}
-	csvBody := string(exported.body)
-	if !strings.HasPrefix(csvBody, "id,email,name,use_case,expected_volume,data_ack,model_id,source,created_at") {
-		t.Fatalf("waitlist CSV header = %q", csvBody)
-	}
-	for _, want := range []string{"Dev Example", "1m_10m", "true", "qwen2.5-7b-instruct"} {
-		if !strings.Contains(csvBody, want) {
-			t.Fatalf("waitlist CSV missing %q: %s", want, csvBody)
+func requireApplication(t *testing.T, signups []operatorstore.WaitlistSignup, email, modelID string) operatorstore.WaitlistSignup {
+	t.Helper()
+	for _, signup := range signups {
+		if signup.Email == email && signup.ModelID == modelID {
+			return signup
 		}
 	}
+	t.Fatalf("no application for %s / %q in %#v", email, modelID, signups)
+	return operatorstore.WaitlistSignup{}
 }
 
 func TestPublicApplicationRateLimit(t *testing.T) {
@@ -284,8 +390,7 @@ type accessApplication struct {
 }
 
 type accessApplicationResponse struct {
-	Status    string `json:"status"`
-	Duplicate bool   `json:"duplicate"`
+	Status string `json:"status"`
 }
 
 func postApplication(t *testing.T, env *m4Env, application accessApplication, wantStatus int) accessApplicationResponse {

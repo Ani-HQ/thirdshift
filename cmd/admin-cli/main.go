@@ -508,6 +508,7 @@ func waitlistList(args []string) error {
 			ModelID        string    `json:"model_id"`
 			Source         string    `json:"source"`
 			CreatedAt      time.Time `json:"created_at"`
+			LastAppliedAt  time.Time `json:"last_applied_at"`
 		} `json:"signups"`
 	}
 	if err := getAdminJSON(strings.TrimRight(*coordinatorURL, "/")+"/internal/v1/waitlist", *operatorToken, &resp); err != nil {
@@ -517,7 +518,7 @@ func waitlistList(args []string) error {
 		fmt.Fprintln(os.Stdout, "no access applications")
 		return nil
 	}
-	fmt.Fprintln(os.Stdout, "EMAIL\tNAME\tMODEL\tVOLUME\tDATA_ACK\tSOURCE\tCREATED_AT\tUSE_CASE")
+	fmt.Fprintln(os.Stdout, "EMAIL\tNAME\tMODEL\tVOLUME\tDATA_ACK\tSOURCE\tLAST_APPLIED_AT\tUSE_CASE")
 	for _, signup := range resp.Signups {
 		fmt.Fprintf(os.Stdout, "%s\t%s\t%s\t%s\t%t\t%s\t%s\t%s\n",
 			signup.Email,
@@ -526,7 +527,7 @@ func waitlistList(args []string) error {
 			dashIfEmpty(signup.ExpectedVolume),
 			signup.DataAck,
 			signup.Source,
-			signup.CreatedAt.Format(time.RFC3339),
+			signup.LastAppliedAt.Format(time.RFC3339),
 			dashIfEmpty(signup.UseCase),
 		)
 	}

@@ -403,6 +403,10 @@ curl -sS -X POST http://127.0.0.1:8080/v1/waitlist \
   -d '{"email":"dev@example.com","name":"Dev","use_case":"alpha model eval","expected_volume":"1m_10m","data_ack":true,"model_id":"qwen2.5-7b-instruct"}' | jq .
 ```
 
+Resubmitting the same email and `model_id` updates that application in place.
+The response is `{"status":"ok"}` either way and never reveals whether the
+address had applied before.
+
 `use_case` and `data_ack: true` are required; `expected_volume` must be empty or one of `lt_1m`, `1m_10m`, `10m_100m`, `gt_100m`.
 
 ## Reviewing Access Applications
@@ -418,8 +422,15 @@ go run ./cmd/admin-cli waitlist export --out applications.csv --coordinator http
 ```
 
 `waitlist list` prints email, name, requested model, expected monthly output
-volume, the data-class acknowledgment, source, timestamp, and the use case.
-`waitlist export` writes the same columns as CSV for offline review.
+volume, the data-class acknowledgment, source, the last application timestamp,
+and the use case, newest application first. `waitlist export` writes the same
+columns as CSV, plus `created_at`, for offline review.
+
+One row is one application for one model. The same address can appear several
+times, once per model it applied for, plus at most one general row where no
+model was named. Resubmitting overwrites that row's answers and moves
+`last_applied_at`, so what you read is always the applicant's latest position;
+`created_at` still shows when they first applied.
 
 What to check per row, in order:
 

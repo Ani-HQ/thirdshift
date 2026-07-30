@@ -79,9 +79,10 @@ func (o Options) waitlistSignupHandler(limiter *waitlistRateLimiter) http.Handle
 		DataAck        bool   `json:"data_ack"`
 		ModelID        string `json:"model_id,omitempty"`
 	}
+	// The response is identical whether this was a first application or a
+	// resubmission, so it cannot be used to probe which addresses have applied.
 	type response struct {
-		Status    string `json:"status"`
-		Duplicate bool   `json:"duplicate"`
+		Status string `json:"status"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		store, ok := o.requireOperatorStore(w)
@@ -105,31 +106,21 @@ func (o Options) waitlistSignupHandler(limiter *waitlistRateLimiter) http.Handle
 			ModelID:        strings.TrimSpace(req.ModelID),
 			Source:         "public_catalog",
 		}
-		// Every field is validated before the duplicate lookup so an
-		// incomplete application can never be answered with a 200.
+		// Every field is validated before the write so an incomplete
+		// application can never be answered with a 200.
 		if err := validateWaitlistApplication(application); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		exists, err := store.WaitlistEmailExists(r.Context(), email)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if exists {
-			writeJSON(w, http.StatusOK, response{Status: "ok", Duplicate: true})
 			return
 		}
 		if !limiter.allow(clientRateLimitKey(r)) {
 			writeError(w, http.StatusTooManyRequests, "waitlist signup rate limit exceeded")
 			return
 		}
-		_, created, err := store.CreateWaitlistSignup(r.Context(), application, o.now())
-		if err != nil {
+		if _, _, err := store.SubmitWaitlistApplication(r.Context(), application, o.now()); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, response{Status: "ok", Duplicate: !created})
+		writeJSON(w, http.StatusOK, response{Status: "ok"})
 	}
 }
 

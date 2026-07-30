@@ -13,6 +13,7 @@
 - Added market price comparison and a rounded cheaper tag to public model rows, sourced from manifest `listing.market_comparison`.
 - Rethemed the public `/status` page to a light minimalist layout with hairline model rows and honest waitlist states; the operator console is unchanged.
 - Fixed a data race in the shared protocol validator's schema cache, which could crash the coordinator with a concurrent map write when several node sessions validated a new message type at the same time.
+- Fixed access applications silently dropping a returning applicant's payload: submissions now upsert on `(email, model_id)` via migration `000010`, so a resubmission overwrites the previous answers and one person can apply for several models. Adds `last_applied_at`, and `POST /v1/waitlist` no longer discloses whether an address had applied before.
 - Raised the integration test wall-clock budgets so a saturated machine running `go test -tags integration ./...` no longer fails scheduling waits that were merely slow.
 
 ## 0.1.0-alpha - 2026-07-30

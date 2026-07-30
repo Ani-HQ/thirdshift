@@ -378,6 +378,7 @@ type WaitlistSignup struct {
 	ModelID        string    `json:"model_id,omitempty"`
 	Source         string    `json:"source"`
 	CreatedAt      time.Time `json:"created_at"`
+	LastAppliedAt  time.Time `json:"last_applied_at"`
 }
 
 // WaitlistApplication is one manually reviewed request for developer access.
@@ -1448,18 +1449,6 @@ ORDER BY n.id
 	return buf.Bytes(), nil
 }
 
-func (s Store) WaitlistEmailExists(ctx context.Context, email string) (bool, error) {
-	email = NormalizeEmail(email)
-	if email == "" {
-		return false, fmt.Errorf("email is required")
-	}
-	var exists bool
-	if err := s.Pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM waitlist_signups WHERE email = $1)", email).Scan(&exists); err != nil {
-		return false, fmt.Errorf("lookup waitlist signup: %w", err)
-	}
-	return exists, nil
-}
-
 // ValidateExpectedVolume accepts an empty band or one of the published
 // monthly output volume options.
 func ValidateExpectedVolume(value string) error {
@@ -1470,7 +1459,12 @@ func ValidateExpectedVolume(value string) error {
 	return fmt.Errorf("expected_volume must be one of lt_1m, 1m_10m, 10m_100m, gt_100m")
 }
 
-func (s Store) CreateWaitlistSignup(ctx context.Context, application WaitlistApplication, now time.Time) (WaitlistSignup, bool, error) {
+// SubmitWaitlistApplication upserts an access application on
+// (email, model_id). Applications are resubmittable: a returning applicant with
+// a better use case must overwrite their previous answers rather than be
+// dropped, and the same person may apply for several models. Reports whether
+// the row was newly inserted.
+func (s Store) SubmitWaitlistApplication(ctx context.Context, application WaitlistApplication, now time.Time) (WaitlistSignup, bool, error) {
 	email := NormalizeEmail(application.Email)
 	if email == "" {
 		return WaitlistSignup{}, false, fmt.Errorf("email is required")
@@ -1494,38 +1488,35 @@ func (s Store) CreateWaitlistSignup(ctx context.Context, application WaitlistApp
 		return WaitlistSignup{}, false, err
 	}
 	var signup WaitlistSignup
+	var inserted bool
+	// created_at keeps the first application; last_applied_at moves. xmax is 0
+	// only on a genuine insert, which is how the upsert reports which happened.
 	err = s.Pool.QueryRow(ctx, `
-INSERT INTO waitlist_signups (id, email, name, use_case, expected_volume, data_ack, model_id, source, created_at)
-VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), $8, $9)
-ON CONFLICT (email) DO NOTHING
-RETURNING id, email, COALESCE(name, ''), COALESCE(use_case, ''), COALESCE(expected_volume, ''), data_ack, COALESCE(model_id, ''), source, created_at
+INSERT INTO waitlist_signups (id, email, name, use_case, expected_volume, data_ack, model_id, source, created_at, last_applied_at)
+VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), $8, $9, $9)
+ON CONFLICT (email, model_id) DO UPDATE
+SET name = EXCLUDED.name,
+    use_case = EXCLUDED.use_case,
+    expected_volume = EXCLUDED.expected_volume,
+    data_ack = EXCLUDED.data_ack,
+    source = EXCLUDED.source,
+    last_applied_at = EXCLUDED.last_applied_at
+RETURNING id, email, COALESCE(name, ''), COALESCE(use_case, ''), COALESCE(expected_volume, ''),
+          data_ack, COALESCE(model_id, ''), source, created_at, last_applied_at, (xmax = 0)
 `, signupID, email, name, useCase, expectedVolume, application.DataAck, modelID, source, now).Scan(
 		&signup.ID, &signup.Email, &signup.Name, &signup.UseCase, &signup.ExpectedVolume,
-		&signup.DataAck, &signup.ModelID, &signup.Source, &signup.CreatedAt)
-	if err == nil {
-		return signup, true, nil
-	}
-	if !errorsIsNoRows(err) {
-		return WaitlistSignup{}, false, fmt.Errorf("create waitlist signup: %w", err)
-	}
-	err = s.Pool.QueryRow(ctx, `
-SELECT id, email, COALESCE(name, ''), COALESCE(use_case, ''), COALESCE(expected_volume, ''), data_ack, COALESCE(model_id, ''), source, created_at
-FROM waitlist_signups
-WHERE email = $1
-`, email).Scan(
-		&signup.ID, &signup.Email, &signup.Name, &signup.UseCase, &signup.ExpectedVolume,
-		&signup.DataAck, &signup.ModelID, &signup.Source, &signup.CreatedAt)
+		&signup.DataAck, &signup.ModelID, &signup.Source, &signup.CreatedAt, &signup.LastAppliedAt, &inserted)
 	if err != nil {
-		return WaitlistSignup{}, false, fmt.Errorf("load existing waitlist signup: %w", err)
+		return WaitlistSignup{}, false, fmt.Errorf("submit waitlist application: %w", err)
 	}
-	return signup, false, nil
+	return signup, inserted, nil
 }
 
 func (s Store) ListWaitlist(ctx context.Context) ([]WaitlistSignup, error) {
 	rows, err := s.Pool.Query(ctx, `
-SELECT id, email, COALESCE(name, ''), COALESCE(use_case, ''), COALESCE(expected_volume, ''), data_ack, COALESCE(model_id, ''), source, created_at
+SELECT id, email, COALESCE(name, ''), COALESCE(use_case, ''), COALESCE(expected_volume, ''), data_ack, COALESCE(model_id, ''), source, created_at, last_applied_at
 FROM waitlist_signups
-ORDER BY created_at DESC, email
+ORDER BY last_applied_at DESC, email, model_id
 LIMIT $1
 `, defaultRecentListSize)
 	if err != nil {
@@ -1537,7 +1528,7 @@ LIMIT $1
 		var signup WaitlistSignup
 		if err := rows.Scan(
 			&signup.ID, &signup.Email, &signup.Name, &signup.UseCase, &signup.ExpectedVolume,
-			&signup.DataAck, &signup.ModelID, &signup.Source, &signup.CreatedAt,
+			&signup.DataAck, &signup.ModelID, &signup.Source, &signup.CreatedAt, &signup.LastAppliedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan waitlist signup: %w", err)
 		}
@@ -1553,7 +1544,7 @@ func (s Store) WaitlistCSV(ctx context.Context) ([]byte, error) {
 	}
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"id", "email", "name", "use_case", "expected_volume", "data_ack", "model_id", "source", "created_at"}); err != nil {
+	if err := writer.Write([]string{"id", "email", "name", "use_case", "expected_volume", "data_ack", "model_id", "source", "created_at", "last_applied_at"}); err != nil {
 		return nil, err
 	}
 	for _, signup := range signups {
@@ -1567,6 +1558,7 @@ func (s Store) WaitlistCSV(ctx context.Context) ([]byte, error) {
 			signup.ModelID,
 			signup.Source,
 			signup.CreatedAt.Format(time.RFC3339),
+			signup.LastAppliedAt.Format(time.RFC3339),
 		}); err != nil {
 			return nil, err
 		}
