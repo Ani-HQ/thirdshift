@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/node/models"
-	noderuntime "github.com/anianroid/thirdshift/internal/node/runtime"
+	"github.com/Ani-HQ/thirdshift/internal/node/models"
+	noderuntime "github.com/Ani-HQ/thirdshift/internal/node/runtime"
 )
 
 const defaultModelQuotaBytes = int64(20 * 1024 * 1024 * 1024)

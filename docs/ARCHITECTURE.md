@@ -71,3 +71,26 @@ Milestone 5 closes the first accounting loop.
 - Challenge outcomes update reputation and can quarantine a node after repeated failures. A single disagreement is recorded but does not quarantine.
 - Reputation now tracks accepted jobs, attempt success, timeouts, hash mismatches, challenge pass rate, duplicate disagreement rate, and session stability defaults. Scheduler scoring consumes the rolling success rate.
 - Host credits remain pending until the hold elapses and an operator runs `admin-cli credits release`. Payout batches reserve available credits, export immutable CSV rows, and confirm payment by posting the payout ledger transaction.
+
+## Operator Console And Fleet Alpha
+
+Milestone 6 adds the software surface for the invited gaming-cafe alpha.
+
+- The coordinator exposes a versioned `/internal/v1` operator API guarded by `THIRDSHIFT_OPERATOR_TOKEN`. Handlers reuse the existing registration, jobs, scheduler, ledger, and reputation stores rather than duplicating business rules.
+- Internal job responses intentionally omit `request_metadata`, prompt bodies, and completion bodies. Operators see job state, model, attempt counts, timings, error codes, and usage-only detail.
+- Operator actions for drain, pause, quarantine, retry, cancel, credit release, payout create/export/confirm, and catalog sync write `operator_actions` or audit rows.
+- Alerts are computed from persisted state: disconnect spikes, failure rate, hash mismatch, runtime crash events, thermal events, ledger imbalance, auth anomalies, and published models with no available capacity.
+- The console is a small Next.js TypeScript app served under `/internal-console`; Caddy fronts the console and coordinator on one origin so the browser can call `/internal/v1` directly with the session-scoped operator token.
+- Fleet enrollment adds `admin-cli fleet create` and fleet-scoped invite defaults. Fleet schedule defaults are returned during node registration and written to node config only when the host has not already configured a local schedule.
+- `admin-cli fleet report` exports per-node jobs, tokens, and host credit CSV for alpha operations.
+
+## Launch Readiness
+
+Milestone 7 adds public launch surfaces and release packaging.
+
+- `thirdshift update` consumes the Ed25519-signed release manifest format, verifies the platform artifact hash and byte length, promotes the new binary into place, and retains the previous binary for rollback.
+- `scripts/install.ps1` installs the Windows x64 host binary under `%LOCALAPPDATA%\Thirdshift\bin`, creates the data directory, adds the bin directory to the user PATH, and runs manifest verification through the bundled updater path. `scripts/uninstall.ps1` removes binaries and can purge data/model cache with `-PurgeData`.
+- Tag pushes run `.github/workflows/release.yml`, building platform zips, `SHA256SUMS`, a signed `release-manifest.json`, and a draft GitHub release.
+- The coordinator exposes unauthenticated `/v1/status` for launch metrics. It is cached for 10 seconds and contains aggregate counts only.
+- Per-node contribution cards use `/v1/nodes/{node_id}/card` and expose only aggregate public stats: node id/name, nights active, jobs accepted, tokens served, and credit earned.
+- The console app has a public `/status` route. Caddy maps `/internal-console` to the operator console and `/status` to the public launch page on the same deployment.

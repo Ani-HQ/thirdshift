@@ -10,15 +10,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/auth"
-	"github.com/anianroid/thirdshift/internal/coordinator/config"
-	"github.com/anianroid/thirdshift/internal/coordinator/httpapi"
-	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
-	"github.com/anianroid/thirdshift/internal/coordinator/registration"
-	"github.com/anianroid/thirdshift/internal/coordinator/sessions"
-	"github.com/anianroid/thirdshift/internal/shared/logging"
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
-	"github.com/anianroid/thirdshift/internal/shared/version"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/auth"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/config"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/httpapi"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/jobs"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/ledger"
+	operatorstore "github.com/Ani-HQ/thirdshift/internal/coordinator/operator"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/registration"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/sessions"
+	"github.com/Ani-HQ/thirdshift/internal/shared/logging"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/shared/version"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -30,7 +32,7 @@ func main() {
 }
 
 func run() error {
-	cfg := config.Load(version.Version)
+	cfg := config.Load(version.String())
 	logger := logging.NewTextLogger(os.Stderr)
 
 	handler := httpapi.NewMux(cfg.Version)
@@ -62,6 +64,13 @@ func run() error {
 			CreditHold:  cfg.CreditHold,
 			Logger:      logger,
 		}
+		operatorStore := operatorstore.Store{
+			Pool:        pool,
+			JobStore:    jobStore,
+			LedgerStore: ledger.Store{Pool: pool},
+			Alerts:      cfg.Alerts,
+			StaleAfter:  cfg.SessionStaleAfter,
+		}
 		validator, err := protocolValidator()
 		if err != nil {
 			return err
@@ -75,6 +84,7 @@ func run() error {
 			TokenSigner:       auth.TokenSigner{Secret: []byte(cfg.AccessTokenSecret), TTL: time.Hour},
 			ProtocolValidator: validator,
 			JobService:        jobService,
+			OperatorStore:     &operatorStore,
 			CatalogDir:        "models/catalog",
 			OperatorToken:     cfg.OperatorToken,
 			HeartbeatInterval: cfg.HeartbeatInterval,

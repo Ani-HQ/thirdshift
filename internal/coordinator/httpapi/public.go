@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
-	"github.com/anianroid/thirdshift/internal/shared/ids"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/jobs"
+	"github.com/Ani-HQ/thirdshift/internal/shared/ids"
 )
 
 const chatCompletionsEndpoint = "/v1/chat/completions"
@@ -92,6 +92,9 @@ func (o Options) catalogSyncHandler() http.HandlerFunc {
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		if o.OperatorStore != nil {
+			_ = o.OperatorStore.RecordManifestSync(r.Context(), catalogDir, count, o.now())
 		}
 		writeJSON(w, http.StatusOK, map[string]int{"synced": count})
 	}

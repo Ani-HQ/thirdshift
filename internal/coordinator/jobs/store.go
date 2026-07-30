@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/ledger"
-	"github.com/anianroid/thirdshift/internal/node/models"
-	"github.com/anianroid/thirdshift/internal/shared/ids"
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/ledger"
+	"github.com/Ani-HQ/thirdshift/internal/node/models"
+	"github.com/Ani-HQ/thirdshift/internal/shared/ids"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

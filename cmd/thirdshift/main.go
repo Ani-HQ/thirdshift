@@ -5,19 +5,26 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	goruntime "runtime"
+	"strings"
 	"syscall"
 	"time"
 
-	nodeagent "github.com/anianroid/thirdshift/internal/node/agent"
-	nodeconfig "github.com/anianroid/thirdshift/internal/node/config"
-	"github.com/anianroid/thirdshift/internal/node/control"
-	"github.com/anianroid/thirdshift/internal/node/hardware"
-	"github.com/anianroid/thirdshift/internal/node/local"
-	noderegistration "github.com/anianroid/thirdshift/internal/node/registration"
-	nodeschedule "github.com/anianroid/thirdshift/internal/node/schedule"
-	"github.com/anianroid/thirdshift/internal/shared/version"
+	nodeagent "github.com/Ani-HQ/thirdshift/internal/node/agent"
+	nodeconfig "github.com/Ani-HQ/thirdshift/internal/node/config"
+	"github.com/Ani-HQ/thirdshift/internal/node/control"
+	"github.com/Ani-HQ/thirdshift/internal/node/hardware"
+	"github.com/Ani-HQ/thirdshift/internal/node/identity"
+	"github.com/Ani-HQ/thirdshift/internal/node/local"
+	noderegistration "github.com/Ani-HQ/thirdshift/internal/node/registration"
+	noderuntime "github.com/Ani-HQ/thirdshift/internal/node/runtime"
+	nodeschedule "github.com/Ani-HQ/thirdshift/internal/node/schedule"
+	nodeupdate "github.com/Ani-HQ/thirdshift/internal/node/update"
+	"github.com/Ani-HQ/thirdshift/internal/shared/version"
 )
 
 func main() {
@@ -29,7 +36,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) > 0 && args[0] == "--version" {
-		fmt.Println(version.Version)
+		fmt.Println(version.String())
 		return nil
 	}
 	if len(args) == 0 {
@@ -53,6 +60,13 @@ func run(args []string) error {
 		return runPauseResume("resume", args[1:])
 	case "run-local":
 		return runLocal(args[1:])
+	case "update":
+		return runUpdate(args[1:])
+	case "card":
+		return runCard(args[1:])
+	case "version":
+		fmt.Println(version.String())
+		return nil
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
 		return nil
@@ -246,6 +260,99 @@ func runPauseResume(action string, args []string) error {
 	return nil
 }
 
+func runUpdate(args []string) error {
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
+	manifestURL := fs.String("manifest", nodeupdate.DefaultReleaseManifestURL, "release manifest URL or local path")
+	installDir := fs.String("install-dir", "", "install directory; defaults to current executable directory")
+	currentBinary := fs.String("current-binary", "", "current binary path; test/development override")
+	publicKeyEncoded := fs.String("public-key", nodeupdate.DefaultReleasePublicKeyBase64, "base64 Ed25519 release public key")
+	platformKey := fs.String("platform", "", "platform key override, such as windows/amd64")
+	verifyOnly := fs.Bool("verify-only", false, "verify a downloaded artifact without installing it")
+	artifactPath := fs.String("artifact", "", "downloaded artifact path for --verify-only")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	publicKey, err := noderuntime.DecodePublicKey(*publicKeyEncoded)
+	if err != nil {
+		return err
+	}
+	if *verifyOnly {
+		if *artifactPath == "" {
+			return fmt.Errorf("--artifact is required with --verify-only")
+		}
+		manifest, err := nodeupdate.LoadManifestBytes(*manifestURL)
+		if err != nil {
+			return err
+		}
+		key := *platformKey
+		if key == "" {
+			key = runtimePlatformKey()
+		}
+		if err := nodeupdate.VerifyDownloadedArtifact(manifest, key, *artifactPath, publicKey); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stdout, "release artifact verified: %s %s\n", manifest.Version, key)
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	result, err := (nodeupdate.Manager{
+		InstallDir:    *installDir,
+		CurrentBinary: *currentBinary,
+		PublicKey:     publicKey,
+		PlatformKey:   *platformKey,
+	}).Update(ctx, *manifestURL)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "updated: %s\ncommit: %s\ninstalled: %s\nprevious: %s\n", result.Version, result.BuildID, result.InstalledPath, result.PreviousPath)
+	return nil
+}
+
+func runCard(args []string) error {
+	fs := flag.NewFlagSet("card", flag.ContinueOnError)
+	dataDir := fs.String("data-dir", os.Getenv("THIRDSHIFT_NODE_DATA_DIR"), "node data directory")
+	coordinatorURL := fs.String("coordinator", "", "coordinator base URL override")
+	nodeID := fs.String("node", "", "node id override")
+	jsonOutput := fs.Bool("json", false, "write JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := nodeconfig.Load(*dataDir)
+	if err != nil {
+		return err
+	}
+	if *coordinatorURL != "" {
+		cfg.CoordinatorURL = *coordinatorURL
+	}
+	if *nodeID == "" || cfg.CoordinatorURL == "" {
+		creds, err := identity.LoadCredentials(cfg.DataDir)
+		if err != nil {
+			return err
+		}
+		if *nodeID == "" {
+			*nodeID = creds.NodeID
+		}
+		if cfg.CoordinatorURL == "" {
+			cfg.CoordinatorURL = creds.CoordinatorURL
+		}
+	}
+	card, err := fetchContributionCard(context.Background(), cfg.CoordinatorURL, *nodeID)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return json.NewEncoder(os.Stdout).Encode(card)
+	}
+	fmt.Fprintln(os.Stdout, "Thirdshift contribution card")
+	fmt.Fprintf(os.Stdout, "Node: %s\n", card.NodeName)
+	fmt.Fprintf(os.Stdout, "Nights active: %d\n", card.NightsActive)
+	fmt.Fprintf(os.Stdout, "Jobs accepted: %d\n", card.JobsAccepted)
+	fmt.Fprintf(os.Stdout, "Tokens served: %d\n", card.TokensServed)
+	fmt.Fprintf(os.Stdout, "Credit earned: %s\n", formatMicrodollars(card.CreditEarnedMicrodollars))
+	return nil
+}
+
 func runDoctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	jsonOutput := fs.Bool("json", false, "write JSON output")
@@ -331,8 +438,65 @@ func dash(value string) string {
 	return value
 }
 
+type contributionCard struct {
+	NodeID                   string    `json:"node_id"`
+	NodeName                 string    `json:"node_name"`
+	NightsActive             int64     `json:"nights_active"`
+	JobsAccepted             int64     `json:"jobs_accepted"`
+	TokensServed             int64     `json:"tokens_served"`
+	CreditEarnedMicrodollars int64     `json:"credit_earned_microdollars"`
+	GeneratedAt              time.Time `json:"generated_at"`
+}
+
+func fetchContributionCard(ctx context.Context, coordinatorURL, nodeID string) (contributionCard, error) {
+	if coordinatorURL == "" {
+		return contributionCard{}, fmt.Errorf("coordinator URL is required")
+	}
+	if nodeID == "" {
+		return contributionCard{}, fmt.Errorf("node id is required")
+	}
+	endpoint := strings.TrimRight(coordinatorURL, "/") + "/v1/nodes/" + url.PathEscape(nodeID) + "/card"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return contributionCard{}, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return contributionCard{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var apiErr struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&apiErr)
+		if apiErr.Error == "" {
+			apiErr.Error = resp.Status
+		}
+		return contributionCard{}, fmt.Errorf("contribution card request failed: %s", apiErr.Error)
+	}
+	var card contributionCard
+	if err := json.NewDecoder(resp.Body).Decode(&card); err != nil {
+		return contributionCard{}, fmt.Errorf("decode contribution card: %w", err)
+	}
+	return card, nil
+}
+
+func formatMicrodollars(value int64) string {
+	sign := ""
+	if value < 0 {
+		sign = "-"
+		value = -value
+	}
+	return fmt.Sprintf("%s$%d.%06d", sign, value/1_000_000, value%1_000_000)
+}
+
+func runtimePlatformKey() string {
+	return goruntime.GOOS + "/" + goruntime.GOARCH
+}
+
 func printUsage(w *os.File) {
-	fmt.Fprintf(w, "thirdshift %s\n", version.Version)
+	fmt.Fprintf(w, "thirdshift %s\n", version.String())
 	fmt.Fprintln(w, "usage:")
 	fmt.Fprintln(w, "  thirdshift doctor [--json]")
 	fmt.Fprintln(w, "  thirdshift configure --from HH:MM --until HH:MM")
@@ -342,4 +506,7 @@ func printUsage(w *os.File) {
 	fmt.Fprintln(w, "  thirdshift pause")
 	fmt.Fprintln(w, "  thirdshift resume")
 	fmt.Fprintln(w, "  thirdshift run-local --model <model-id> --prompt <text>")
+	fmt.Fprintln(w, "  thirdshift update --manifest <release-manifest-url>")
+	fmt.Fprintln(w, "  thirdshift card [--json]")
+	fmt.Fprintln(w, "  thirdshift version")
 }

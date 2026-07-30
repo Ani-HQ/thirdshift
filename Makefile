@@ -1,10 +1,15 @@
 GO ?= go
 MIGRATIONS_DIR ?= migrations
+VERSION ?= 0.1.0-alpha
+COMMIT ?= unknown
+BUILD_DATE ?= unknown
+VERSION_PKG := github.com/Ani-HQ/thirdshift/internal/shared/version
+LDFLAGS ?= -X '$(VERSION_PKG).Version=$(VERSION)' -X '$(VERSION_PKG).Commit=$(COMMIT)' -X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'
 
-.PHONY: build test lint migrate dev test-slice test-integration build-windows doctor-json run-local coordinator org catalog-sync apikey fake-runtime chat-demo invite nodes credits-release payout-create payout-export payout-confirm payout-void report-economics start status configure pause resume
+.PHONY: build test lint migrate dev test-slice test-integration build-windows ps-check doctor-json run-local coordinator org catalog-sync apikey fake-runtime chat-demo invite nodes credits-release payout-create payout-export payout-confirm payout-void report-economics console-dev console-build console-test start status configure pause resume
 
 build:
-	$(GO) build ./...
+	$(GO) build -ldflags "$(LDFLAGS)" ./...
 
 test:
 	$(GO) test ./...
@@ -26,7 +31,14 @@ test-integration:
 	$(GO) test -tags integration ./...
 
 build-windows:
-	GOOS=windows GOARCH=amd64 $(GO) build ./...
+	GOOS=windows GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" ./...
+
+ps-check:
+	@if command -v pwsh >/dev/null 2>&1; then \
+		pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ps-check.ps1; \
+	else \
+		$(GO) run ./scripts/pscheck scripts/*.ps1; \
+	fi
 
 doctor-json:
 	$(GO) run ./cmd/thirdshift doctor --json
@@ -75,6 +87,15 @@ payout-void:
 
 report-economics:
 	$(GO) run ./cmd/admin-cli report economics
+
+console-dev:
+	cd web/console && npm run dev
+
+console-build:
+	cd web/console && npm ci && npm run typecheck && npm run build
+
+console-test:
+	cd web/console && npm ci && npm test -- --run
 
 start:
 	$(GO) run ./cmd/thirdshift start

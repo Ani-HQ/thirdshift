@@ -2,14 +2,14 @@ package protocol
 
 import (
 	"encoding/json"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
-	sharedprotocol "github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/shared/fileurl"
+	sharedprotocol "github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -108,9 +108,12 @@ func compileSchema(t *testing.T, path string) *jsonschema.Schema {
 	if err != nil {
 		t.Fatalf("absolute path for %s: %v", path, err)
 	}
-	uri := url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}
+	uri, err := fileurl.FromPath(abs)
+	if err != nil {
+		t.Fatalf("file URL for %s: %v", path, err)
+	}
 	compiler := jsonschema.NewCompiler()
-	schema, err := compiler.Compile(uri.String())
+	schema, err := compiler.Compile(uri)
 	if err != nil {
 		t.Fatalf("compile schema %s: %v", path, err)
 	}

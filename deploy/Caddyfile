@@ -3,6 +3,27 @@
 }
 
 :8081 {
-  reverse_proxy coordinator:8080
-}
+  handle /status* {
+    reverse_proxy console:3000
+  }
 
+  handle /_next* {
+    reverse_proxy console:3000
+  }
+
+  handle_path /internal-console* {
+    reverse_proxy console:3000
+  }
+
+  handle /internal/* {
+    reverse_proxy coordinator:8080
+  }
+
+  handle /v1/* {
+    reverse_proxy coordinator:8080
+  }
+
+  handle /healthz {
+    reverse_proxy coordinator:8080
+  }
+}

@@ -46,4 +46,13 @@ func TestLoadSaveConfig(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "config.toml")); err != nil {
 		t.Fatalf("config file missing: %v", err)
 	}
+	if !HasScheduleOverride(dir) {
+		t.Fatal("saved config should be treated as a local schedule override")
+	}
+}
+
+func TestHasScheduleOverrideFalseWithoutConfig(t *testing.T) {
+	if HasScheduleOverride(t.TempDir()) {
+		t.Fatal("empty data dir should not have a schedule override")
+	}
 }

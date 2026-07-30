@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/shared/nodeauth"
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/shared/nodeauth"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 )
 
 type SendFunc func(ctx context.Context, typ protocol.MessageType, payload any) error

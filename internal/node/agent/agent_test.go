@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/node/control"
-	nodestate "github.com/anianroid/thirdshift/internal/node/state"
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/node/control"
+	nodestate "github.com/Ani-HQ/thirdshift/internal/node/state"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 	"nhooyr.io/websocket"
 )
 

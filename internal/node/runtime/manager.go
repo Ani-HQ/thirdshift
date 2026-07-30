@@ -15,6 +15,8 @@ import (
 	goruntime "runtime"
 	"strings"
 	"time"
+
+	"github.com/Ani-HQ/thirdshift/internal/shared/fileurl"
 )
 
 type Manager struct {
@@ -207,9 +209,9 @@ func writeJSON(path string, value any) error {
 func downloadFile(ctx context.Context, client *http.Client, rawurl, dest string) error {
 	parsed, err := url.Parse(rawurl)
 	if err == nil && parsed.Scheme == "file" {
-		return copyLocalFile(parsed.Path, dest)
+		return copyLocalFile(fileurl.ToPath(parsed), dest)
 	}
-	if err == nil && parsed.Scheme == "" {
+	if err == nil && fileurl.IsLocalRawURL(parsed) {
 		return copyLocalFile(rawurl, dest)
 	}
 

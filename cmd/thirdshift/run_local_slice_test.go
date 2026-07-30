@@ -21,9 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/node/local"
-	noderuntime "github.com/anianroid/thirdshift/internal/node/runtime"
-	"github.com/anianroid/thirdshift/internal/node/runtime/fakellama"
+	"github.com/Ani-HQ/thirdshift/internal/node/local"
+	noderuntime "github.com/Ani-HQ/thirdshift/internal/node/runtime"
+	"github.com/Ani-HQ/thirdshift/internal/node/runtime/fakellama"
+	"github.com/Ani-HQ/thirdshift/internal/shared/fileurl"
 )
 
 func TestMain(m *testing.M) {
@@ -136,7 +137,7 @@ func signedSliceRuntimeManifest(t *testing.T, privateKey ed25519.PrivateKey) nod
 		BuildID:       "fake-slice",
 		Artifacts: map[string]noderuntime.RuntimeArtifact{
 			goruntime.GOOS + "/" + goruntime.GOARCH: {
-				URL:            "file://" + filepath.ToSlash(executable),
+				URL:            mustFileURL(t, executable),
 				SHA256:         "sha256:" + hex.EncodeToString(sum[:]),
 				SizeBytes:      int64(len(data)),
 				ArchiveType:    "binary",
@@ -151,6 +152,15 @@ func signedSliceRuntimeManifest(t *testing.T, privateKey ed25519.PrivateKey) nod
 	}
 	manifest.Signature.Value = base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, body))
 	return manifest
+}
+
+func mustFileURL(t *testing.T, path string) string {
+	t.Helper()
+	url, err := fileurl.FromPath(path)
+	if err != nil {
+		t.Fatalf("file URL for %s: %v", path, err)
+	}
+	return url
 }
 
 func writeJSON(t *testing.T, path string, value any) {

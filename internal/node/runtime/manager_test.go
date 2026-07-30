@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Ani-HQ/thirdshift/internal/shared/fileurl"
 )
 
 func TestRuntimeManagerRejectsTamperedBinary(t *testing.T) {
@@ -207,5 +209,9 @@ func sha256Bytes(data []byte) []byte {
 }
 
 func fileURL(path string) string {
-	return "file://" + filepath.ToSlash(path)
+	url, err := fileurl.FromPath(path)
+	if err != nil {
+		panic(err)
+	}
+	return url
 }

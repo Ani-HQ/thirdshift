@@ -9,17 +9,19 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/anianroid/thirdshift/internal/coordinator/auth"
-	"github.com/anianroid/thirdshift/internal/coordinator/jobs"
-	"github.com/anianroid/thirdshift/internal/coordinator/registration"
-	nodestate "github.com/anianroid/thirdshift/internal/node/state"
-	"github.com/anianroid/thirdshift/internal/shared/ids"
-	"github.com/anianroid/thirdshift/internal/shared/nodeauth"
-	"github.com/anianroid/thirdshift/internal/shared/protocol"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/auth"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/jobs"
+	operatorstore "github.com/Ani-HQ/thirdshift/internal/coordinator/operator"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/registration"
+	nodestate "github.com/Ani-HQ/thirdshift/internal/node/state"
+	"github.com/Ani-HQ/thirdshift/internal/shared/ids"
+	"github.com/Ani-HQ/thirdshift/internal/shared/nodeauth"
+	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 	"nhooyr.io/websocket"
 )
 
@@ -35,9 +37,11 @@ type Options struct {
 	TokenSigner       auth.TokenSigner
 	ProtocolValidator *protocol.Validator
 	JobService        *jobs.Service
+	OperatorStore     *operatorstore.Store
 	CatalogDir        string
 	OperatorToken     string
 	HeartbeatInterval time.Duration
+	StatusCacheTTL    time.Duration
 	Now               func() time.Time
 	Logger            *slog.Logger
 }
@@ -78,14 +82,39 @@ func NewMuxWithOptions(opts Options) http.Handler {
 	if opts.JobService != nil && opts.JobService.RateLimiter == nil {
 		opts.JobService.RateLimiter = &jobs.RateLimiter{LimitPerMinute: 60, Now: opts.now}
 	}
+	if opts.StatusCacheTTL <= 0 {
+		opts.StatusCacheTTL = 10 * time.Second
+	}
 
 	mux := http.NewServeMux()
+	statusCache := &publicStatusCache{}
 	mux.HandleFunc("GET /healthz", healthHandler(opts.Version))
+	mux.HandleFunc("GET /v1/status", opts.publicStatusHandler(statusCache))
+	mux.HandleFunc("GET /v1/nodes/{node_id}/card", opts.publicNodeCardHandler())
 	mux.HandleFunc("POST /internal/v1/orgs", opts.operatorOnly(opts.createOrgHandler()))
 	mux.HandleFunc("POST /internal/v1/api-keys", opts.operatorOnly(opts.createAPIKeyHandler()))
 	mux.HandleFunc("POST /internal/v1/catalog/sync", opts.operatorOnly(opts.catalogSyncHandler()))
 	mux.HandleFunc("POST /internal/v1/invites", opts.operatorOnly(opts.createInviteHandler()))
 	mux.HandleFunc("GET /internal/v1/nodes", opts.operatorOnly(opts.nodesListHandler()))
+	mux.HandleFunc("GET /internal/v1/overview", opts.operatorOnly(opts.operatorOverviewHandler()))
+	mux.HandleFunc("GET /internal/v1/alerts", opts.operatorOnly(opts.operatorAlertsHandler()))
+	mux.HandleFunc("GET /internal/v1/nodes/{node_id}", opts.operatorOnly(opts.operatorNodeDetailHandler()))
+	mux.HandleFunc("POST /internal/v1/nodes/{node_id}/drain", opts.operatorOnly(opts.operatorNodeActionHandler("drain")))
+	mux.HandleFunc("POST /internal/v1/nodes/{node_id}/pause", opts.operatorOnly(opts.operatorNodeActionHandler("pause")))
+	mux.HandleFunc("POST /internal/v1/nodes/{node_id}/quarantine", opts.operatorOnly(opts.operatorNodeActionHandler("quarantine")))
+	mux.HandleFunc("GET /internal/v1/models", opts.operatorOnly(opts.operatorModelsHandler()))
+	mux.HandleFunc("GET /internal/v1/jobs", opts.operatorOnly(opts.operatorJobsHandler()))
+	mux.HandleFunc("GET /internal/v1/jobs/{job_id}", opts.operatorOnly(opts.operatorJobDetailHandler()))
+	mux.HandleFunc("POST /internal/v1/jobs/{job_id}/retry", opts.operatorOnly(opts.operatorJobActionHandler("retry")))
+	mux.HandleFunc("POST /internal/v1/jobs/{job_id}/cancel", opts.operatorOnly(opts.operatorJobActionHandler("cancel")))
+	mux.HandleFunc("GET /internal/v1/ledger", opts.operatorOnly(opts.operatorLedgerHandler()))
+	mux.HandleFunc("POST /internal/v1/ledger/credits/release", opts.operatorOnly(opts.operatorCreditsReleaseHandler()))
+	mux.HandleFunc("POST /internal/v1/payout-batches", opts.operatorOnly(opts.operatorPayoutCreateHandler()))
+	mux.HandleFunc("GET /internal/v1/payout-batches/{batch_id}/export", opts.operatorOnly(opts.operatorPayoutExportHandler()))
+	mux.HandleFunc("POST /internal/v1/payout-batches/{batch_id}/confirm", opts.operatorOnly(opts.operatorPayoutConfirmHandler()))
+	mux.HandleFunc("GET /internal/v1/audit", opts.operatorOnly(opts.operatorAuditHandler()))
+	mux.HandleFunc("POST /internal/v1/fleets", opts.operatorOnly(opts.operatorFleetCreateHandler()))
+	mux.HandleFunc("GET /internal/v1/fleets/{fleet_id}/report", opts.operatorOnly(opts.operatorFleetReportHandler()))
 	mux.HandleFunc("GET /v1/models", opts.developerOnly(opts.modelsHandler()))
 	mux.HandleFunc("POST /v1/chat/completions", opts.developerOnly(opts.chatCompletionsHandler()))
 	mux.HandleFunc("POST /v1/jobs", opts.developerOnly(opts.createJobHandler()))
@@ -228,6 +257,15 @@ func (o Options) refreshTokenHandler() http.HandlerFunc {
 
 func (o Options) nodesListHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if o.OperatorStore != nil {
+			nodes, err := o.OperatorStore.ListNodes(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
+			return
+		}
 		if o.SessionStore == nil {
 			writeError(w, http.StatusServiceUnavailable, "node store is not configured")
 			return
@@ -470,9 +508,101 @@ func statusForError(err error) int {
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	_ = json.NewEncoder(w).Encode(normalizeNilSlicesForJSON(body))
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+var rawMessageType = reflect.TypeOf(json.RawMessage{})
+
+func normalizeNilSlicesForJSON(body any) any {
+	if body == nil {
+		return body
+	}
+	normalized := normalizeNilSlices(reflect.ValueOf(body))
+	if !normalized.IsValid() || !normalized.CanInterface() {
+		return body
+	}
+	return normalized.Interface()
+}
+
+func normalizeNilSlices(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return value
+	}
+	if value.Type() == rawMessageType {
+		return value
+	}
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return value
+		}
+		return normalizeNilSlices(value.Elem())
+	case reflect.Pointer:
+		if value.IsNil() {
+			return value
+		}
+		normalized := normalizeNilSlices(value.Elem())
+		if !normalized.IsValid() || !normalized.Type().AssignableTo(value.Elem().Type()) {
+			return value
+		}
+		out := reflect.New(value.Elem().Type())
+		out.Elem().Set(normalized)
+		return out
+	case reflect.Struct:
+		out := reflect.New(value.Type()).Elem()
+		out.Set(value)
+		for idx := 0; idx < value.NumField(); idx++ {
+			fieldInfo := value.Type().Field(idx)
+			if fieldInfo.PkgPath != "" {
+				continue
+			}
+			normalized := normalizeNilSlices(value.Field(idx))
+			target := out.Field(idx)
+			if normalized.IsValid() && target.CanSet() && normalized.Type().AssignableTo(target.Type()) {
+				target.Set(normalized)
+			}
+		}
+		return out
+	case reflect.Slice:
+		if value.Type().Elem().Kind() == reflect.Uint8 {
+			return value
+		}
+		if value.IsNil() {
+			return reflect.MakeSlice(value.Type(), 0, 0)
+		}
+		out := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for idx := 0; idx < value.Len(); idx++ {
+			normalized := normalizeNilSlices(value.Index(idx))
+			target := out.Index(idx)
+			if normalized.IsValid() && normalized.Type().AssignableTo(target.Type()) {
+				target.Set(normalized)
+			} else {
+				target.Set(value.Index(idx))
+			}
+		}
+		return out
+	case reflect.Map:
+		if value.IsNil() {
+			return value
+		}
+		out := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			normalized := normalizeNilSlices(iter.Value())
+			if normalized.IsValid() && normalized.Type().AssignableTo(value.Type().Elem()) {
+				out.SetMapIndex(iter.Key(), normalized)
+			} else if normalized.IsValid() && normalized.Type().ConvertibleTo(value.Type().Elem()) {
+				out.SetMapIndex(iter.Key(), normalized.Convert(value.Type().Elem()))
+			} else {
+				out.SetMapIndex(iter.Key(), iter.Value())
+			}
+		}
+		return out
+	default:
+		return value
+	}
 }
