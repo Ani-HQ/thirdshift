@@ -28,6 +28,114 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestModelListingStatusDefaultsToLiveAndIsConstrained(t *testing.T) {
+	ctx := context.Background()
+	conn, schema := migratedTestSchema(t, ctx)
+	defer conn.Close(ctx)
+	defer dropSchema(t, ctx, conn, schema)
+
+	if _, err := conn.Exec(ctx, `
+INSERT INTO models (id, display_name) VALUES ('listing-default', 'Listing Default');
+INSERT INTO models (id, display_name, listing_status, expected_output_tokens_per_second,
+                    market_typical_input_per_million_microdollars,
+                    market_typical_output_per_million_microdollars,
+                    market_comparison_source_note)
+VALUES ('listing-waitlist', 'Listing Waitlist', 'waitlist', 30, 40000, 100000, 'typical hosted price, July 2026');
+INSERT INTO models (id, display_name, listing_status) VALUES ('listing-hidden', 'Listing Hidden', 'hidden');
+`); err != nil {
+		t.Fatalf("insert listing rows: %v", err)
+	}
+	var defaultStatus string
+	if err := conn.QueryRow(ctx, "SELECT listing_status FROM models WHERE id = 'listing-default'").Scan(&defaultStatus); err != nil {
+		t.Fatalf("read default listing status: %v", err)
+	}
+	if defaultStatus != "live" {
+		t.Fatalf("default listing_status = %q, want live", defaultStatus)
+	}
+	if _, err := conn.Exec(ctx, "INSERT INTO models (id, display_name, listing_status) VALUES ('listing-bad', 'Bad', 'coming_soon')"); err == nil {
+		t.Fatal("unknown listing_status accepted")
+	}
+	if _, err := conn.Exec(ctx, `
+INSERT INTO models (id, display_name, market_typical_input_per_million_microdollars)
+VALUES ('listing-half-comparison', 'Half Comparison', 40000)`); err == nil {
+		t.Fatal("half-populated market comparison accepted")
+	}
+}
+
+func TestWaitlistApplicationColumnsAreConstrained(t *testing.T) {
+	ctx := context.Background()
+	conn, schema := migratedTestSchema(t, ctx)
+	defer conn.Close(ctx)
+	defer dropSchema(t, ctx, conn, schema)
+
+	if _, err := conn.Exec(ctx, `
+INSERT INTO waitlist_signups (id, email, name, use_case, expected_volume, data_ack, model_id)
+VALUES ('wait_01J0M000000000000000000000', 'dev@example.com', 'Dev', 'Batch summaries', '10m_100m', true, 'qwen2.5-7b-instruct');
+INSERT INTO waitlist_signups (id, email) VALUES ('wait_01J0M000000000000000000001', 'legacy@example.com');
+`); err != nil {
+		t.Fatalf("insert applications: %v", err)
+	}
+	var legacyAck bool
+	if err := conn.QueryRow(ctx, "SELECT data_ack FROM waitlist_signups WHERE email = 'legacy@example.com'").Scan(&legacyAck); err != nil {
+		t.Fatalf("read legacy data_ack: %v", err)
+	}
+	if legacyAck {
+		t.Fatal("rows predating the acknowledgment must default to false")
+	}
+	if _, err := conn.Exec(ctx, `
+INSERT INTO waitlist_signups (id, email, expected_volume)
+VALUES ('wait_01J0M000000000000000000002', 'bad@example.com', 'loads')`); err == nil {
+		t.Fatal("unknown expected_volume band accepted")
+	}
+}
+
+func TestWaitlistUniquenessIsPerEmailAndModel(t *testing.T) {
+	ctx := context.Background()
+	conn, schema := migratedTestSchema(t, ctx)
+	defer conn.Close(ctx)
+	defer dropSchema(t, ctx, conn, schema)
+
+	if _, err := conn.Exec(ctx, `
+INSERT INTO waitlist_signups (id, email, use_case, data_ack, model_id)
+VALUES ('wait_01J0M000000000000000000000', 'dev@example.com', 'Chat', true, 'qwen2.5-7b-instruct');
+INSERT INTO waitlist_signups (id, email, use_case, data_ack, model_id)
+VALUES ('wait_01J0M000000000000000000001', 'dev@example.com', 'Code', true, 'qwen2.5-coder-7b-instruct');
+INSERT INTO waitlist_signups (id, email, use_case, data_ack)
+VALUES ('wait_01J0M000000000000000000002', 'dev@example.com', 'General', true);
+`); err != nil {
+		t.Fatalf("one applicant across several models must be allowed: %v", err)
+	}
+
+	if _, err := conn.Exec(ctx, `
+INSERT INTO waitlist_signups (id, email, use_case, data_ack, model_id)
+VALUES ('wait_01J0M000000000000000000003', 'dev@example.com', 'Chat again', true, 'qwen2.5-7b-instruct')`); err == nil {
+		t.Fatal("duplicate (email, model_id) insert succeeded, want unique violation")
+	}
+
+	// NULLS NOT DISTINCT: a second general application for the same address is
+	// the same key, so it must conflict instead of piling up another row.
+	if _, err := conn.Exec(ctx, `
+INSERT INTO waitlist_signups (id, email, use_case, data_ack)
+VALUES ('wait_01J0M000000000000000000004', 'dev@example.com', 'General again', true)`); err == nil {
+		t.Fatal("second general application inserted, want unique violation on (email, NULL)")
+	}
+
+	// The same model for a different address is unrelated.
+	if _, err := conn.Exec(ctx, `
+INSERT INTO waitlist_signups (id, email, use_case, data_ack, model_id)
+VALUES ('wait_01J0M000000000000000000005', 'other@example.com', 'Chat', true, 'qwen2.5-7b-instruct')`); err != nil {
+		t.Fatalf("same model for a different applicant rejected: %v", err)
+	}
+
+	var lastApplied int
+	if err := conn.QueryRow(ctx, "SELECT count(*) FROM waitlist_signups WHERE last_applied_at IS NOT NULL").Scan(&lastApplied); err != nil {
+		t.Fatalf("count last_applied_at: %v", err)
+	}
+	if lastApplied != 4 {
+		t.Fatalf("rows with last_applied_at = %d, want 4", lastApplied)
+	}
+}
+
 func TestLedgerPostedTransactionsMustBalance(t *testing.T) {
 	ctx := context.Background()
 	conn, schema := migratedTestSchema(t, ctx)

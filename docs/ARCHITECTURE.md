@@ -94,3 +94,14 @@ Milestone 7 adds public launch surfaces and release packaging.
 - The coordinator exposes unauthenticated `/v1/status` for launch metrics. It is cached for 10 seconds and contains aggregate counts only.
 - Per-node contribution cards use `/v1/nodes/{node_id}/card` and expose only aggregate public stats: node id/name, nights active, jobs accepted, tokens served, and credit earned.
 - The console app has a public `/status` route. Caddy maps `/internal-console` to the operator console and `/status` to the public launch page on the same deployment.
+
+## Public Catalog And Discovery
+
+The public discovery surface builds on `/v1/status` without adding public host inventory.
+
+- Fleets and nodes can carry nullable region codes. Effective region is node override, then fleet default, then unknown. Public APIs expose only distinct region aggregates and counts.
+- `/v1/status` includes a `models` array with display name, optional description, capabilities, public input/output prices, data class, limits, availability state, median 24-hour output tokens/sec, and aggregate available regions.
+- Availability is model-first: `available` means at least one fresh eligible node can take work, `limited` means fresh model-serving capacity exists but is not currently eligible, and `offline` means no fresh model-serving capacity is visible.
+- Requester region comes from a trusted reverse-proxy header configured by `THIRDSHIFT_REQUESTER_REGION_HEADER`; the coordinator performs no IP geolocation.
+- `/v1/waitlist` accepts unauthenticated developer interest, stores normalized unique emails, treats duplicates as successful idempotent responses, and rate-limits new signups in memory per remote IP.
+- The public `/status` console route renders the model catalog, aggregate network pulse, invite-only curl example, and waitlist form. It does not render node names, hardware strings, prompts, completions, or per-node details.

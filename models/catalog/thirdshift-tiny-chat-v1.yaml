@@ -2,6 +2,9 @@ schema_version: 1
 model_id: thirdshift-tiny-chat-v1
 display_name: Thirdshift Tiny Chat v1
 status: alpha
+listing:
+  status: hidden
+  description: Internal smoke-test model for the routed request path. Not offered to developers.
 source:
   provider: huggingface
   repository: unsloth/SmolLM2-135M-Instruct-GGUF

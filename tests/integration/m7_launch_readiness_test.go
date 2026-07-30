@@ -107,6 +107,8 @@ func assertNoNullListFields(t *testing.T, name string, body []byte) {
 		[]byte(`"manifest_changes":null`),
 		[]byte(`"cities":null`),
 		[]byte(`"models_available":null`),
+		[]byte(`"models":null`),
+		[]byte(`"regions_online":null`),
 	} {
 		if bytes.Contains(body, forbidden) {
 			t.Fatalf("%s response contains null list field %s: %s", name, string(forbidden), string(body))

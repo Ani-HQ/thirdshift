@@ -190,13 +190,7 @@ func TestM5DuplicateSampleSecondNodeRecordsAgreement(t *testing.T) {
 	if calls := firstRuntime.callCount() + secondRuntime.callCount(); calls != 2 {
 		t.Fatalf("runtime calls = %d, want 2 for duplicate sample", calls)
 	}
-	var overhead int
-	if err := env.pool.QueryRow(env.ctx, "SELECT count(*) FROM ledger_transactions WHERE transaction_type = 'verification_overhead' AND status = 'posted'").Scan(&overhead); err != nil {
-		t.Fatalf("count verification overhead transactions: %v", err)
-	}
-	if overhead != 1 {
-		t.Fatalf("verification overhead transactions = %d, want 1", overhead)
-	}
+	waitForLedgerTransactionCount(t, env, ledger.TransactionVerificationCost, 1)
 }
 
 func TestM5PayoutLifecycleAndEconomicsReport(t *testing.T) {
@@ -370,6 +364,22 @@ func waitForVerificationEvent(t *testing.T, env *m4Env, eventType, status string
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for verification event %s/%s", eventType, status)
+}
+
+func waitForLedgerTransactionCount(t *testing.T, env *m4Env, transactionType string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var count int
+	for time.Now().Before(deadline) {
+		if err := env.pool.QueryRow(env.ctx, "SELECT count(*) FROM ledger_transactions WHERE transaction_type = $1 AND status = 'posted'", transactionType).Scan(&count); err != nil {
+			t.Fatalf("count %s ledger transactions: %v", transactionType, err)
+		}
+		if count == want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("%s ledger transactions = %d, want %d", transactionType, count, want)
 }
 
 type ioDiscard struct{}

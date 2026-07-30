@@ -126,6 +126,9 @@ export type PublicStatus = {
   connected_node_count: number;
   cities: string[];
   models_available: Array<{ model_id: string; available_nodes: number }>;
+  models: PublicCatalogModel[];
+  regions_online: string[];
+  requester_region: string | null;
   jobs_completed_24h: number;
   jobs_completed_total: number;
   output_tokens_served_24h: number;
@@ -133,4 +136,51 @@ export type PublicStatus = {
   estimated_gpu_hours_reused: number;
   estimated_gpu_hours_reused_24h: number;
   generated_at: string;
+};
+
+export type PublicModelListingStatus = "live" | "waitlist";
+
+export type PublicModelAvailabilityState = "available" | "limited" | "offline" | "waitlist";
+
+export type PublicMarketComparison = {
+  typical_input_per_million_microdollars: number;
+  typical_output_per_million_microdollars: number;
+  source_note: string;
+};
+
+export type PublicCatalogModel = {
+  model_id: string;
+  display_name: string;
+  description: string;
+  listing_status: PublicModelListingStatus;
+  capabilities: string[];
+  price: {
+    input_per_million_microdollars: number;
+    output_per_million_microdollars: number;
+  };
+  market_comparison: PublicMarketComparison | null;
+  data_class: string;
+  limits: {
+    context_tokens: number;
+    max_output_tokens: number;
+  };
+  availability: {
+    available_nodes: number;
+    state: PublicModelAvailabilityState;
+  };
+  typical_output_tokens_per_second: number | null;
+  expected_output_tokens_per_second: number | null;
+  regions: string[];
+  version: string;
+};
+
+export type ExpectedVolumeBand = "" | "lt_1m" | "1m_10m" | "10m_100m" | "gt_100m";
+
+export type AccessApplication = {
+  email: string;
+  name: string;
+  use_case: string;
+  expected_volume: ExpectedVolumeBand;
+  data_ack: boolean;
+  model_id: string;
 };

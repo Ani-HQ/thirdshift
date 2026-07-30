@@ -7,6 +7,8 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -30,9 +32,38 @@ const (
 	ActionPayoutConfirm   = "payout.confirm"
 	ActionCatalogSync     = "catalog.sync"
 	ActionCreditsRelease  = "credits.release"
+	ActionFleetSetRegion  = "fleet.set_region"
+	ActionNodeSetRegion   = "node.set_region"
 	defaultOperatorActor  = "operator-token"
 	defaultRecentListSize = 100
 )
+
+// Public listing statuses mirror the catalog manifest listing block and the
+// models.listing_status column.
+const (
+	ListingLive     = "live"
+	ListingWaitlist = "waitlist"
+	ListingHidden   = "hidden"
+)
+
+// Public availability states. Only the first three describe measured supply;
+// waitlist means the model is offered for applications with no supply yet.
+const (
+	AvailabilityAvailable = "available"
+	AvailabilityLimited   = "limited"
+	AvailabilityOffline   = "offline"
+	AvailabilityWaitlist  = "waitlist"
+)
+
+// Expected monthly output volume bands collected on the access application.
+var expectedVolumeBands = map[string]bool{
+	"lt_1m":    true,
+	"1m_10m":   true,
+	"10m_100m": true,
+	"gt_100m":  true,
+}
+
+var regionPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 type Store struct {
 	Pool        *pgxpool.Pool
@@ -95,6 +126,7 @@ type NodeSummary struct {
 	OrganizationID          string             `json:"organization_id,omitempty"`
 	FleetID                 string             `json:"fleet_id,omitempty"`
 	FleetName               string             `json:"fleet_name,omitempty"`
+	Region                  string             `json:"region,omitempty"`
 	State                   string             `json:"state"`
 	CurrentModelID          string             `json:"current_model_id,omitempty"`
 	QuarantinedAt           *time.Time         `json:"quarantined_at,omitempty"`
@@ -250,6 +282,9 @@ type PublicStatus struct {
 	ConnectedNodeCount        int                 `json:"connected_node_count"`
 	Cities                    []string            `json:"cities"`
 	ModelsAvailable           []ModelAvailability `json:"models_available"`
+	Models                    []PublicModelStatus `json:"models"`
+	RegionsOnline             []string            `json:"regions_online"`
+	RequesterRegion           *string             `json:"requester_region"`
 	JobsCompleted24h          int64               `json:"jobs_completed_24h"`
 	JobsCompletedTotal        int64               `json:"jobs_completed_total"`
 	OutputTokensServed24h     int64               `json:"output_tokens_served_24h"`
@@ -257,6 +292,47 @@ type PublicStatus struct {
 	EstimatedGPUHoursReused   float64             `json:"estimated_gpu_hours_reused"`
 	EstimatedGPUHoursReused24 float64             `json:"estimated_gpu_hours_reused_24h"`
 	GeneratedAt               time.Time           `json:"generated_at"`
+}
+
+type PublicModelStatus struct {
+	ModelID                       string                       `json:"model_id"`
+	DisplayName                   string                       `json:"display_name"`
+	Description                   string                       `json:"description"`
+	ListingStatus                 string                       `json:"listing_status"`
+	Capabilities                  []string                     `json:"capabilities"`
+	Price                         PublicModelPrice             `json:"price"`
+	MarketComparison              *PublicModelMarketComparison `json:"market_comparison"`
+	DataClass                     string                       `json:"data_class"`
+	Limits                        PublicModelLimits            `json:"limits"`
+	Availability                  PublicModelAvailability      `json:"availability"`
+	TypicalOutputTokensPerSecond  *float64                     `json:"typical_output_tokens_per_second"`
+	ExpectedOutputTokensPerSecond *float64                     `json:"expected_output_tokens_per_second"`
+	Regions                       []string                     `json:"regions"`
+	Version                       string                       `json:"version"`
+}
+
+// PublicModelMarketComparison carries the operator-recorded typical hosted
+// price for the same model class. It is only ever present when a catalog
+// manifest supplies both numbers and a source note.
+type PublicModelMarketComparison struct {
+	TypicalInputPerMillionMicrodollars  int64  `json:"typical_input_per_million_microdollars"`
+	TypicalOutputPerMillionMicrodollars int64  `json:"typical_output_per_million_microdollars"`
+	SourceNote                          string `json:"source_note"`
+}
+
+type PublicModelPrice struct {
+	InputPerMillionMicrodollars  int64 `json:"input_per_million_microdollars"`
+	OutputPerMillionMicrodollars int64 `json:"output_per_million_microdollars"`
+}
+
+type PublicModelLimits struct {
+	ContextTokens   int `json:"context_tokens"`
+	MaxOutputTokens int `json:"max_output_tokens"`
+}
+
+type PublicModelAvailability struct {
+	AvailableNodes int    `json:"available_nodes"`
+	State          string `json:"state"`
 }
 
 type ContributionCard struct {
@@ -285,10 +361,35 @@ type Fleet struct {
 	ID               string    `json:"id"`
 	OrganizationID   string    `json:"organization_id"`
 	Name             string    `json:"name"`
+	Region           string    `json:"region,omitempty"`
 	ScheduleFrom     string    `json:"schedule_from,omitempty"`
 	ScheduleUntil    string    `json:"schedule_until,omitempty"`
 	ScheduleTimezone string    `json:"schedule_timezone"`
 	CreatedAt        time.Time `json:"created_at"`
+}
+
+type WaitlistSignup struct {
+	ID             string    `json:"id"`
+	Email          string    `json:"email"`
+	Name           string    `json:"name,omitempty"`
+	UseCase        string    `json:"use_case,omitempty"`
+	ExpectedVolume string    `json:"expected_volume,omitempty"`
+	DataAck        bool      `json:"data_ack"`
+	ModelID        string    `json:"model_id,omitempty"`
+	Source         string    `json:"source"`
+	CreatedAt      time.Time `json:"created_at"`
+	LastAppliedAt  time.Time `json:"last_applied_at"`
+}
+
+// WaitlistApplication is one manually reviewed request for developer access.
+type WaitlistApplication struct {
+	Email          string
+	Name           string
+	UseCase        string
+	ExpectedVolume string
+	DataAck        bool
+	ModelID        string
+	Source         string
 }
 
 type ScheduleDefaults struct {
@@ -341,6 +442,7 @@ func (s Store) ListNodes(ctx context.Context) ([]NodeSummary, error) {
 	}
 	rows, err := s.Pool.Query(ctx, `
 SELECT n.id, COALESCE(n.organization_id, ''), COALESCE(n.fleet_id, ''), COALESCE(f.name, ''),
+       COALESCE(NULLIF(n.region, ''), NULLIF(f.region, ''), ''),
        n.state, COALESCE(n.current_model_id, ''), n.quarantined_at, n.last_seen_at,
        COALESCE(ns.state, 'none'), ns.last_heartbeat_at,
        COALESCE(hb.gpu, '{}'::jsonb), COALESCE(hb.schedule_state, ''), COALESCE(hb.thermal_state, ''),
@@ -383,7 +485,7 @@ ORDER BY n.id
 		var quarantinedAt, lastSeenAt, lastHeartbeatAt sql.NullTime
 		var gpuRaw []byte
 		if err := rows.Scan(
-			&node.ID, &node.OrganizationID, &node.FleetID, &node.FleetName,
+			&node.ID, &node.OrganizationID, &node.FleetID, &node.FleetName, &node.Region,
 			&node.State, &node.CurrentModelID, &quarantinedAt, &lastSeenAt,
 			&node.SessionStatus, &lastHeartbeatAt, &gpuRaw, &node.ScheduleState, &node.ThermalState,
 			&node.Paused, &node.Draining, &node.Reputation.TotalAcceptedJobs,
@@ -856,13 +958,17 @@ func (s Store) PublicStatus(ctx context.Context, now time.Time) (PublicStatus, e
 	if err != nil {
 		return PublicStatus{}, err
 	}
-	models, err := s.ListModels(ctx)
+	publicModels, err := s.publicModels(ctx, now)
 	if err != nil {
 		return PublicStatus{}, err
 	}
-	modelsAvailable := make([]ModelAvailability, 0, len(models))
-	for _, model := range models {
-		modelsAvailable = append(modelsAvailable, ModelAvailability{ModelID: model.ID, AvailableNodes: model.AvailableNodes})
+	modelsAvailable := make([]ModelAvailability, 0, len(publicModels))
+	for _, model := range publicModels {
+		modelsAvailable = append(modelsAvailable, ModelAvailability{ModelID: model.ModelID, AvailableNodes: model.Availability.AvailableNodes})
+	}
+	regionsOnline, err := s.regionsOnline(ctx, now)
+	if err != nil {
+		return PublicStatus{}, err
 	}
 	var completed24h, completedTotal int64
 	if err := s.Pool.QueryRow(ctx, `
@@ -889,6 +995,8 @@ WHERE jr.accepted
 		ConnectedNodeCount:        connected,
 		Cities:                    []string{},
 		ModelsAvailable:           modelsAvailable,
+		Models:                    publicModels,
+		RegionsOnline:             regionsOnline,
 		JobsCompleted24h:          completed24h,
 		JobsCompletedTotal:        completedTotal,
 		OutputTokensServed24h:     output24h,
@@ -897,6 +1005,241 @@ WHERE jr.accepted
 		EstimatedGPUHoursReused24: gpuHours24h,
 		GeneratedAt:               now,
 	}, nil
+}
+
+func (s Store) publicModels(ctx context.Context, now time.Time) ([]PublicModelStatus, error) {
+	rows, err := s.Pool.Query(ctx, `
+SELECT m.id, m.display_name, COALESCE(m.description, ''), m.listing_status, m.data_class, mv.version,
+       COALESCE(mp.customer_input_per_million_microdollars, 0),
+       COALESCE(mp.customer_output_per_million_microdollars, 0),
+       m.market_typical_input_per_million_microdollars,
+       m.market_typical_output_per_million_microdollars,
+       COALESCE(m.market_comparison_source_note, ''),
+       m.expected_output_tokens_per_second::float8,
+       COALESCE(ml.max_input_tokens, 4096),
+       COALESCE(ml.max_output_tokens, 1024),
+       COALESCE(ml.capabilities, '{}'::jsonb)
+FROM models m
+JOIN LATERAL (
+  SELECT * FROM model_versions WHERE model_id = m.id ORDER BY created_at DESC LIMIT 1
+) mv ON true
+LEFT JOIN LATERAL (
+  SELECT * FROM model_prices WHERE model_version_id = mv.id ORDER BY effective_from DESC LIMIT 1
+) mp ON true
+LEFT JOIN model_manifest_limits ml ON ml.model_id = m.id
+WHERE m.status IN ('alpha', 'active') AND m.listing_status <> 'hidden'
+ORDER BY (m.listing_status = 'waitlist'), m.id
+`)
+	if err != nil {
+		return nil, fmt.Errorf("query public models: %w", err)
+	}
+	defer rows.Close()
+	out := []PublicModelStatus{}
+	for rows.Next() {
+		var model PublicModelStatus
+		var capabilitiesRaw []byte
+		var marketInput, marketOutput *int64
+		var marketSourceNote string
+		var expectedSpeed *float64
+		if err := rows.Scan(
+			&model.ModelID, &model.DisplayName, &model.Description, &model.ListingStatus, &model.DataClass, &model.Version,
+			&model.Price.InputPerMillionMicrodollars, &model.Price.OutputPerMillionMicrodollars,
+			&marketInput, &marketOutput, &marketSourceNote, &expectedSpeed,
+			&model.Limits.ContextTokens, &model.Limits.MaxOutputTokens, &capabilitiesRaw,
+		); err != nil {
+			return nil, fmt.Errorf("scan public model: %w", err)
+		}
+		if model.Description == "" {
+			model.Description = model.DisplayName
+		}
+		if marketInput != nil && marketOutput != nil {
+			model.MarketComparison = &PublicModelMarketComparison{
+				TypicalInputPerMillionMicrodollars:  *marketInput,
+				TypicalOutputPerMillionMicrodollars: *marketOutput,
+				SourceNote:                          marketSourceNote,
+			}
+		}
+		model.Capabilities = publicCapabilities(capabilitiesRaw)
+		capacity, err := s.publicModelCapacity(ctx, model.ModelID, now.Add(-s.staleAfter()))
+		if err != nil {
+			return nil, err
+		}
+		if model.ListingStatus == ListingWaitlist && !capacity.hasSupply() {
+			// No node is online with this model, so there is nothing honest
+			// to say about nodes, regions, or observed speed. The manifest's
+			// expected speed is the only claim, and the public page labels it
+			// as expected.
+			model.Availability = PublicModelAvailability{State: AvailabilityWaitlist}
+			model.Regions = []string{}
+			model.ExpectedOutputTokensPerSecond = expectedSpeed
+			out = append(out, model)
+			continue
+		}
+		model.Availability = PublicModelAvailability{AvailableNodes: capacity.availableNodes, State: capacity.state()}
+		model.Regions = capacity.regions
+		speed, err := s.medianOutputTokensPerSecond(ctx, model.ModelID, now.Add(-24*time.Hour))
+		if err != nil {
+			return nil, err
+		}
+		model.TypicalOutputTokensPerSecond = speed
+		out = append(out, model)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate public models: %w", err)
+	}
+	return out, nil
+}
+
+type publicModelCapacity struct {
+	availableNodes int
+	freshNodes     int
+	regions        []string
+}
+
+// hasSupply reports whether any node is currently online with this model, in
+// any state. It gates the waitlist presentation: real supply always wins.
+func (c publicModelCapacity) hasSupply() bool {
+	return c.availableNodes > 0 || c.freshNodes > 0
+}
+
+func (c publicModelCapacity) state() string {
+	if c.availableNodes > 0 {
+		return AvailabilityAvailable
+	}
+	if c.freshNodes > 0 {
+		return AvailabilityLimited
+	}
+	return AvailabilityOffline
+}
+
+func (s Store) publicModelCapacity(ctx context.Context, modelID string, freshnessCutoff time.Time) (publicModelCapacity, error) {
+	rows, err := s.Pool.Query(ctx, `
+WITH latest_model AS (
+  SELECT mv.id AS model_version_id, ma.sha256 AS model_sha256, rr.binary_sha256 AS runtime_sha256
+  FROM model_versions mv
+  JOIN model_artifacts ma ON ma.model_version_id = mv.id AND ma.artifact_type = 'gguf'
+  LEFT JOIN runtime_releases rr ON rr.id = mv.runtime_release_id
+  WHERE mv.model_id = $1
+  ORDER BY mv.created_at DESC
+  LIMIT 1
+)
+SELECT COALESCE(NULLIF(n.region, ''), NULLIF(f.region, ''), '') AS region,
+       (
+         n.state = 'AVAILABLE'
+         AND ns.state = 'connected'
+         AND n.quarantined_at IS NULL
+         AND hb.schedule_state = 'in_window'
+         AND hb.thermal_state = 'normal'
+         AND hb.paused = false
+         AND hb.draining = false
+         AND hb.model_hash = 'sha256:' || lm.model_sha256
+         AND hb.runtime_hash = 'sha256:' || lm.runtime_sha256
+         AND NOT EXISTS (
+           SELECT 1 FROM job_attempts ja
+           WHERE ja.node_id = n.id AND ja.status IN ('offered', 'accepted', 'running')
+         )
+       ) AS eligible
+FROM latest_model lm
+JOIN nodes n ON n.current_model_id = $1
+LEFT JOIN fleets f ON f.id = n.fleet_id
+JOIN LATERAL (
+  SELECT id, state, COALESCE(last_heartbeat_at, connected_at) AS freshness
+  FROM node_sessions
+  WHERE node_id = n.id AND state IN ('connected', 'draining')
+  ORDER BY connected_at DESC
+  LIMIT 1
+) ns ON true
+JOIN LATERAL (
+  SELECT model_hash, runtime_hash, schedule_state, thermal_state, paused, draining
+  FROM node_heartbeats
+  WHERE node_id = n.id AND session_id = ns.id
+  ORDER BY received_at DESC
+  LIMIT 1
+) hb ON true
+WHERE ns.freshness >= $2
+  AND hb.model_hash = 'sha256:' || lm.model_sha256
+  AND hb.runtime_hash = 'sha256:' || lm.runtime_sha256
+`, modelID, freshnessCutoff)
+	if err != nil {
+		return publicModelCapacity{}, fmt.Errorf("query public model capacity: %w", err)
+	}
+	defer rows.Close()
+	capacity := publicModelCapacity{}
+	regions := map[string]bool{}
+	for rows.Next() {
+		var region string
+		var eligible bool
+		if err := rows.Scan(&region, &eligible); err != nil {
+			return publicModelCapacity{}, fmt.Errorf("scan public model capacity: %w", err)
+		}
+		capacity.freshNodes++
+		if eligible {
+			capacity.availableNodes++
+			if region != "" {
+				regions[region] = true
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return publicModelCapacity{}, fmt.Errorf("iterate public model capacity: %w", err)
+	}
+	capacity.regions = sortedKeys(regions)
+	return capacity, nil
+}
+
+func (s Store) medianOutputTokensPerSecond(ctx context.Context, modelID string, since time.Time) (*float64, error) {
+	var speed sql.NullFloat64
+	if err := s.Pool.QueryRow(ctx, `
+SELECT percentile_cont(0.5) WITHIN GROUP (
+  ORDER BY jr.completion_tokens::float8 / (GREATEST(jr.coordinator_duration_millis, jr.duration_millis)::float8 / 1000.0)
+)
+FROM job_results jr
+JOIN jobs j ON j.id = jr.job_id
+WHERE j.model_id = $1
+  AND jr.accepted
+  AND jr.created_at >= $2
+  AND jr.completion_tokens > 0
+  AND GREATEST(jr.coordinator_duration_millis, jr.duration_millis) > 0
+`, modelID, since).Scan(&speed); err != nil {
+		return nil, fmt.Errorf("query median output tokens/sec: %w", err)
+	}
+	if !speed.Valid {
+		return nil, nil
+	}
+	value := speed.Float64
+	return &value, nil
+}
+
+func (s Store) regionsOnline(ctx context.Context, now time.Time) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, `
+SELECT DISTINCT COALESCE(NULLIF(n.region, ''), NULLIF(f.region, '')) AS region
+FROM nodes n
+LEFT JOIN fleets f ON f.id = n.fleet_id
+JOIN LATERAL (
+  SELECT state, COALESCE(last_heartbeat_at, connected_at) AS freshness
+  FROM node_sessions
+  WHERE node_id = n.id
+  ORDER BY connected_at DESC
+  LIMIT 1
+) ns ON true
+WHERE ns.state IN ('connected', 'draining')
+  AND ns.freshness >= $1
+  AND COALESCE(NULLIF(n.region, ''), NULLIF(f.region, '')) IS NOT NULL
+ORDER BY region
+`, now.Add(-s.staleAfter()))
+	if err != nil {
+		return nil, fmt.Errorf("query online regions: %w", err)
+	}
+	defer rows.Close()
+	regions := []string{}
+	for rows.Next() {
+		var region string
+		if err := rows.Scan(&region); err != nil {
+			return nil, fmt.Errorf("scan online region: %w", err)
+		}
+		regions = append(regions, region)
+	}
+	return regions, rows.Err()
 }
 
 func (s Store) ContributionCard(ctx context.Context, nodeID string, now time.Time) (ContributionCard, error) {
@@ -939,7 +1282,7 @@ WHERE ja.node_id = $1 AND ja.status = 'succeeded'
 	return card, nil
 }
 
-func (s Store) CreateFleet(ctx context.Context, orgID, name string, schedule ScheduleDefaults, now time.Time) (Fleet, error) {
+func (s Store) CreateFleet(ctx context.Context, orgID, name string, schedule ScheduleDefaults, region string, now time.Time) (Fleet, error) {
 	if strings.TrimSpace(orgID) == "" {
 		return Fleet{}, fmt.Errorf("organization id is required")
 	}
@@ -965,20 +1308,82 @@ func (s Store) CreateFleet(ctx context.Context, orgID, name string, schedule Sch
 	if timezone == "" {
 		timezone = "local"
 	}
+	region, err := NormalizeRegion(region)
+	if err != nil {
+		return Fleet{}, err
+	}
 	fleetID, err := ids.New("fleet")
 	if err != nil {
 		return Fleet{}, err
 	}
 	var created Fleet
 	err = s.Pool.QueryRow(ctx, `
-INSERT INTO fleets (id, organization_id, name, enrollment_status, schedule_from, schedule_until, schedule_timezone, schedule_updated_at, created_at, updated_at)
-VALUES ($1, $2, $3, 'active', NULLIF($4, ''), NULLIF($5, ''), $6, $7, $7, $7)
-RETURNING id, organization_id, name, COALESCE(schedule_from, ''), COALESCE(schedule_until, ''), schedule_timezone, created_at
-`, fleetID, orgID, strings.TrimSpace(name), from, until, timezone, now).Scan(&created.ID, &created.OrganizationID, &created.Name, &created.ScheduleFrom, &created.ScheduleUntil, &created.ScheduleTimezone, &created.CreatedAt)
+INSERT INTO fleets (id, organization_id, name, enrollment_status, region, schedule_from, schedule_until, schedule_timezone, schedule_updated_at, created_at, updated_at)
+VALUES ($1, $2, $3, 'active', NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''), $7, $8, $8, $8)
+RETURNING id, organization_id, name, COALESCE(region, ''), COALESCE(schedule_from, ''), COALESCE(schedule_until, ''), schedule_timezone, created_at
+`, fleetID, orgID, strings.TrimSpace(name), region, from, until, timezone, now).Scan(&created.ID, &created.OrganizationID, &created.Name, &created.Region, &created.ScheduleFrom, &created.ScheduleUntil, &created.ScheduleTimezone, &created.CreatedAt)
 	if err != nil {
 		return Fleet{}, fmt.Errorf("create fleet: %w", err)
 	}
 	return created, nil
+}
+
+func (s Store) SetFleetRegion(ctx context.Context, fleetID, region, reason string, now time.Time) error {
+	region, err := NormalizeRegion(region)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(fleetID) == "" {
+		return fmt.Errorf("fleet id is required")
+	}
+	if now.IsZero() {
+		now = s.now()
+	}
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin fleet region update: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(ctx, `
+UPDATE fleets
+SET region = NULLIF($2, ''), updated_at = $3
+WHERE id = $1
+`, fleetID, region, now); err != nil {
+		return fmt.Errorf("update fleet region: %w", err)
+	}
+	if err := recordOperatorActionTx(ctx, tx, ActionFleetSetRegion, "fleet", fleetID, reason, map[string]any{"region": region}, now); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s Store) SetNodeRegion(ctx context.Context, nodeID, region, reason string, now time.Time) error {
+	region, err := NormalizeRegion(region)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(nodeID) == "" {
+		return fmt.Errorf("node id is required")
+	}
+	if now.IsZero() {
+		now = s.now()
+	}
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin node region update: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(ctx, `
+UPDATE nodes
+SET region = NULLIF($2, ''), updated_at = $3
+WHERE id = $1
+`, nodeID, region, now); err != nil {
+		return fmt.Errorf("update node region: %w", err)
+	}
+	if err := recordOperatorActionTx(ctx, tx, ActionNodeSetRegion, "node", nodeID, reason, map[string]any{"region": region}, now); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (s Store) FleetReportCSV(ctx context.Context, fleetID string, from, until time.Time) ([]byte, error) {
@@ -1044,6 +1449,127 @@ ORDER BY n.id
 	return buf.Bytes(), nil
 }
 
+// ValidateExpectedVolume accepts an empty band or one of the published
+// monthly output volume options.
+func ValidateExpectedVolume(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" || expectedVolumeBands[value] {
+		return nil
+	}
+	return fmt.Errorf("expected_volume must be one of lt_1m, 1m_10m, 10m_100m, gt_100m")
+}
+
+// SubmitWaitlistApplication upserts an access application on
+// (email, model_id). Applications are resubmittable: a returning applicant with
+// a better use case must overwrite their previous answers rather than be
+// dropped, and the same person may apply for several models. Reports whether
+// the row was newly inserted.
+func (s Store) SubmitWaitlistApplication(ctx context.Context, application WaitlistApplication, now time.Time) (WaitlistSignup, bool, error) {
+	email := NormalizeEmail(application.Email)
+	if email == "" {
+		return WaitlistSignup{}, false, fmt.Errorf("email is required")
+	}
+	if err := ValidateExpectedVolume(application.ExpectedVolume); err != nil {
+		return WaitlistSignup{}, false, err
+	}
+	if now.IsZero() {
+		now = s.now()
+	}
+	name := strings.TrimSpace(application.Name)
+	useCase := strings.TrimSpace(application.UseCase)
+	expectedVolume := strings.TrimSpace(application.ExpectedVolume)
+	modelID := strings.TrimSpace(application.ModelID)
+	source := strings.TrimSpace(application.Source)
+	if source == "" {
+		source = "public_catalog"
+	}
+	signupID, err := ids.New("wait")
+	if err != nil {
+		return WaitlistSignup{}, false, err
+	}
+	var signup WaitlistSignup
+	var inserted bool
+	// created_at keeps the first application; last_applied_at moves. xmax is 0
+	// only on a genuine insert, which is how the upsert reports which happened.
+	err = s.Pool.QueryRow(ctx, `
+INSERT INTO waitlist_signups (id, email, name, use_case, expected_volume, data_ack, model_id, source, created_at, last_applied_at)
+VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), $8, $9, $9)
+ON CONFLICT (email, model_id) DO UPDATE
+SET name = EXCLUDED.name,
+    use_case = EXCLUDED.use_case,
+    expected_volume = EXCLUDED.expected_volume,
+    data_ack = EXCLUDED.data_ack,
+    source = EXCLUDED.source,
+    last_applied_at = EXCLUDED.last_applied_at
+RETURNING id, email, COALESCE(name, ''), COALESCE(use_case, ''), COALESCE(expected_volume, ''),
+          data_ack, COALESCE(model_id, ''), source, created_at, last_applied_at, (xmax = 0)
+`, signupID, email, name, useCase, expectedVolume, application.DataAck, modelID, source, now).Scan(
+		&signup.ID, &signup.Email, &signup.Name, &signup.UseCase, &signup.ExpectedVolume,
+		&signup.DataAck, &signup.ModelID, &signup.Source, &signup.CreatedAt, &signup.LastAppliedAt, &inserted)
+	if err != nil {
+		return WaitlistSignup{}, false, fmt.Errorf("submit waitlist application: %w", err)
+	}
+	return signup, inserted, nil
+}
+
+func (s Store) ListWaitlist(ctx context.Context) ([]WaitlistSignup, error) {
+	rows, err := s.Pool.Query(ctx, `
+SELECT id, email, COALESCE(name, ''), COALESCE(use_case, ''), COALESCE(expected_volume, ''), data_ack, COALESCE(model_id, ''), source, created_at, last_applied_at
+FROM waitlist_signups
+ORDER BY last_applied_at DESC, email, model_id
+LIMIT $1
+`, defaultRecentListSize)
+	if err != nil {
+		return nil, fmt.Errorf("query waitlist signups: %w", err)
+	}
+	defer rows.Close()
+	var out []WaitlistSignup
+	for rows.Next() {
+		var signup WaitlistSignup
+		if err := rows.Scan(
+			&signup.ID, &signup.Email, &signup.Name, &signup.UseCase, &signup.ExpectedVolume,
+			&signup.DataAck, &signup.ModelID, &signup.Source, &signup.CreatedAt, &signup.LastAppliedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan waitlist signup: %w", err)
+		}
+		out = append(out, signup)
+	}
+	return out, rows.Err()
+}
+
+func (s Store) WaitlistCSV(ctx context.Context) ([]byte, error) {
+	signups, err := s.ListWaitlist(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
+	if err := writer.Write([]string{"id", "email", "name", "use_case", "expected_volume", "data_ack", "model_id", "source", "created_at", "last_applied_at"}); err != nil {
+		return nil, err
+	}
+	for _, signup := range signups {
+		if err := writer.Write([]string{
+			signup.ID,
+			signup.Email,
+			signup.Name,
+			signup.UseCase,
+			signup.ExpectedVolume,
+			strconv.FormatBool(signup.DataAck),
+			signup.ModelID,
+			signup.Source,
+			signup.CreatedAt.Format(time.RFC3339),
+			signup.LastAppliedAt.Format(time.RFC3339),
+		}); err != nil {
+			return nil, err
+		}
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func EffectiveSchedule(local ScheduleDefaults, hasLocalOverride bool, fleet ScheduleDefaults) ScheduleDefaults {
 	if hasLocalOverride && local.From != "" && local.Until != "" {
 		local.Source = "node"
@@ -1067,6 +1593,29 @@ func EffectiveSchedule(local ScheduleDefaults, hasLocalOverride bool, fleet Sche
 	}
 	local.Source = "node"
 	return local
+}
+
+func NormalizeRegion(value string) (string, error) {
+	region := strings.ToLower(strings.TrimSpace(value))
+	if region == "" {
+		return "", nil
+	}
+	if !regionPattern.MatchString(region) {
+		return "", fmt.Errorf("region must use lowercase letters, digits, and hyphen separators")
+	}
+	return region, nil
+}
+
+func EffectiveRegion(nodeRegion, fleetRegion string) string {
+	nodeRegion = strings.TrimSpace(nodeRegion)
+	if nodeRegion != "" {
+		return nodeRegion
+	}
+	return strings.TrimSpace(fleetRegion)
+}
+
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
 
 func (s Store) RecordManifestSync(ctx context.Context, catalogDir string, synced int, now time.Time) error {
@@ -1489,4 +2038,28 @@ func validateClock(value string) error {
 
 func errorsIsNoRows(err error) bool {
 	return err == pgx.ErrNoRows
+}
+
+func publicCapabilities(raw []byte) []string {
+	var values map[string]bool
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return []string{}
+	}
+	capabilities := make([]string, 0, len(values))
+	for capability, enabled := range values {
+		if enabled {
+			capabilities = append(capabilities, capability)
+		}
+	}
+	sort.Strings(capabilities)
+	return capabilities
+}
+
+func sortedKeys(values map[string]bool) []string {
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }

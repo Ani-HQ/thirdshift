@@ -271,6 +271,7 @@ func (o Options) operatorFleetCreateHandler() http.HandlerFunc {
 	type request struct {
 		OrgID            string `json:"org_id"`
 		Name             string `json:"name"`
+		Region           string `json:"region,omitempty"`
 		ScheduleFrom     string `json:"schedule_from,omitempty"`
 		ScheduleUntil    string `json:"schedule_until,omitempty"`
 		ScheduleTimezone string `json:"schedule_timezone,omitempty"`
@@ -289,12 +290,60 @@ func (o Options) operatorFleetCreateHandler() http.HandlerFunc {
 			From:     req.ScheduleFrom,
 			Until:    req.ScheduleUntil,
 			Timezone: req.ScheduleTimezone,
-		}, o.now())
+		}, req.Region, o.now())
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusCreated, fleet)
+	}
+}
+
+func (o Options) operatorFleetRegionHandler() http.HandlerFunc {
+	type request struct {
+		Region string `json:"region"`
+		Reason string `json:"reason,omitempty"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		store, ok := o.requireOperatorStore(w)
+		if !ok {
+			return
+		}
+		var req request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		fleetID := r.PathValue("fleet_id")
+		if err := store.SetFleetRegion(r.Context(), fleetID, req.Region, req.Reason, o.now()); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "fleet_id": fleetID, "region": strings.TrimSpace(req.Region)})
+	}
+}
+
+func (o Options) operatorNodeRegionHandler() http.HandlerFunc {
+	type request struct {
+		Region string `json:"region"`
+		Reason string `json:"reason,omitempty"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		store, ok := o.requireOperatorStore(w)
+		if !ok {
+			return
+		}
+		var req request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		nodeID := r.PathValue("node_id")
+		if err := store.SetNodeRegion(r.Context(), nodeID, req.Region, req.Reason, o.now()); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "node_id": nodeID, "region": strings.TrimSpace(req.Region)})
 	}
 }
 
@@ -317,6 +366,38 @@ func (o Options) operatorFleetReportHandler() http.HandlerFunc {
 		body, err := store.FleetReportCSV(r.Context(), r.PathValue("fleet_id"), from, until)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "text/csv")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}
+}
+
+func (o Options) operatorWaitlistHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		store, ok := o.requireOperatorStore(w)
+		if !ok {
+			return
+		}
+		signups, err := store.ListWaitlist(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"signups": signups})
+	}
+}
+
+func (o Options) operatorWaitlistExportHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		store, ok := o.requireOperatorStore(w)
+		if !ok {
+			return
+		}
+		body, err := store.WaitlistCSV(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		w.Header().Set("Content-Type", "text/csv")

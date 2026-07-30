@@ -365,3 +365,100 @@ make ps-check
 ```
 
 Before publishing a draft release, confirm that `release-manifest.json` has a non-empty Ed25519 signature and that `SHA256SUMS` matches every zip. Follow [docs/RELEASE.md](RELEASE.md) for key generation, signing, and user verification.
+
+## Public Catalog And Waitlist Drill
+
+Set aggregate regions:
+
+```sh
+export THIRDSHIFT_COORDINATOR_URL=http://127.0.0.1:8081
+export THIRDSHIFT_OPERATOR_TOKEN=dev-operator-token
+
+go run ./cmd/admin-cli fleet set-region --fleet "$FLEET_ID" --region in-south --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+go run ./cmd/admin-cli node set-region --node "$NODE_ID" --region eu-west --coordinator "$THIRDSHIFT_COORDINATOR_URL" --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+```
+
+Node region overrides fleet region. Clear an override by passing an empty region value.
+
+Preview the public catalog without Docker or Caddy:
+
+```sh
+THIRDSHIFT_OPERATOR_TOKEN=dev-operator-token THIRDSHIFT_ACCESS_TOKEN_SECRET=dev-access-token-secret-change-me THIRDSHIFT_DATABASE_URL="$THIRDSHIFT_DATABASE_URL" go run ./cmd/coordinator
+```
+
+In a second shell:
+
+```sh
+cd web/console && THIRDSHIFT_COORDINATOR_URL=http://127.0.0.1:8080 npm run dev
+```
+
+Open `http://127.0.0.1:3000/status`. The Next dev server proxies `/v1/*` to the coordinator when `THIRDSHIFT_COORDINATOR_URL` is set.
+
+Check the public API directly:
+
+```sh
+curl -sS -H 'X-Geo-Region: in-south' http://127.0.0.1:8080/v1/status | jq .
+curl -sS -X POST http://127.0.0.1:8080/v1/waitlist \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"dev@example.com","name":"Dev","use_case":"alpha model eval","expected_volume":"1m_10m","data_ack":true,"model_id":"qwen2.5-7b-instruct"}' | jq .
+```
+
+Resubmitting the same email and `model_id` updates that application in place.
+The response is `{"status":"ok"}` either way and never reveals whether the
+address had applied before.
+
+`use_case` and `data_ack: true` are required; `expected_volume` must be empty or one of `lt_1m`, `1m_10m`, `10m_100m`, `gt_100m`.
+
+## Reviewing Access Applications
+
+Every application is reviewed by hand. Nothing is emailed automatically, so the
+review loop is: read the queue, decide, then issue a key out of band.
+
+Read and export the queue:
+
+```sh
+go run ./cmd/admin-cli waitlist list --coordinator http://127.0.0.1:8080 --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+go run ./cmd/admin-cli waitlist export --out applications.csv --coordinator http://127.0.0.1:8080 --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+```
+
+`waitlist list` prints email, name, requested model, expected monthly output
+volume, the data-class acknowledgment, source, the last application timestamp,
+and the use case, newest application first. `waitlist export` writes the same
+columns as CSV, plus `created_at`, for offline review.
+
+One row is one application for one model. The same address can appear several
+times, once per model it applied for, plus at most one general row where no
+model was named. Resubmitting overwrites that row's answers and moves
+`last_applied_at`, so what you read is always the applicant's latest position;
+`created_at` still shows when they first applied.
+
+What to check per row, in order:
+
+1. `data_ack` is `true`. It always is for applications submitted through the
+   public form; a `false` value means the row predates the acknowledgment
+   column and the applicant must reapply before any key is issued.
+2. The use case is compatible with the data-class policy. Anything that reads
+   like regulated, personal, or confidential data is a decline: community nodes
+   cannot guarantee host-blind confidentiality.
+3. The requested model is listed and supply exists or is planned. A waitlist
+   model has no nodes yet, so approving it means committing to bring supply
+   online before the key is useful.
+4. The volume band is plausible against current supply. `gt_100m` against a
+   handful of nodes is a conversation, not an approval.
+
+Approve by creating the organization and key, then reply to the applicant by
+hand:
+
+```sh
+go run ./cmd/admin-cli org create --name "Applicant Org" --coordinator "$THIRDSHIFT_COORDINATOR_URL"
+go run ./cmd/admin-cli apikey create --org "$ORG_ID" --model qwen2.5-7b-instruct --coordinator "$THIRDSHIFT_COORDINATOR_URL"
+```
+
+The key secret is shown once at creation. Model permissions are explicit per
+key, so only grant the models the application actually asked for.
+
+Turning a waitlist model into a live one is a supply decision, not a code
+change: bring nodes online with the model and the public page moves from
+"Available on request" to a live availability state by itself. To stop offering
+a model publicly, set its manifest `listing.status` to `hidden` and re-run
+`catalog sync`; the model stays routable for existing keys.

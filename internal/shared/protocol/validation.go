@@ -5,13 +5,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/Ani-HQ/thirdshift/internal/shared/fileurl"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
+// Validator is safe for concurrent use: the coordinator shares one validator
+// across every node session goroutine.
 type Validator struct {
 	schemasDir string
+	mu         sync.RWMutex
 	cache      map[MessageType]*jsonschema.Schema
 }
 
@@ -77,7 +81,7 @@ func (v *Validator) MarshalAndValidate(envelope Envelope) ([]byte, error) {
 }
 
 func (v *Validator) schemaFor(typ MessageType) (*jsonschema.Schema, error) {
-	if schema := v.cache[typ]; schema != nil {
+	if schema := v.cachedSchema(typ); schema != nil {
 		return schema, nil
 	}
 	path := filepath.Join(v.schemasDir, string(typ)+".schema.json")
@@ -94,6 +98,19 @@ func (v *Validator) schemaFor(typ MessageType) (*jsonschema.Schema, error) {
 	if err != nil {
 		return nil, fmt.Errorf("compile schema for %s: %w", typ, err)
 	}
+	// Two goroutines can compile the same schema on first use. The compiled
+	// schemas are immutable and equivalent, so storing either is correct.
+	v.mu.Lock()
+	if v.cache == nil {
+		v.cache = map[MessageType]*jsonschema.Schema{}
+	}
 	v.cache[typ] = schema
+	v.mu.Unlock()
 	return schema, nil
+}
+
+func (v *Validator) cachedSchema(typ MessageType) *jsonschema.Schema {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.cache[typ]
 }

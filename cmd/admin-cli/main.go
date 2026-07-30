@@ -42,8 +42,12 @@ func run(args []string) error {
 		return invite(args[1:])
 	case "fleet":
 		return fleet(args[1:])
+	case "node":
+		return node(args[1:])
 	case "nodes":
 		return nodes(args[1:])
+	case "waitlist":
+		return waitlist(args[1:])
 	case "credits":
 		return credits(args[1:])
 	case "payout":
@@ -226,6 +230,8 @@ func fleet(args []string) error {
 	switch args[0] {
 	case "create":
 		return fleetCreate(args[1:])
+	case "set-region":
+		return fleetSetRegion(args[1:])
 	case "report":
 		return fleetReport(args[1:])
 	default:
@@ -238,6 +244,7 @@ func fleetCreate(args []string) error {
 	fs.SetOutput(os.Stderr)
 	orgID := fs.String("org", "", "organization id")
 	name := fs.String("name", "", "fleet name")
+	region := fs.String("region", "", "optional public aggregate region code, for example in-south")
 	scheduleFrom := fs.String("schedule-from", "", "optional fleet default local schedule start in HH:MM")
 	scheduleUntil := fs.String("schedule-until", "", "optional fleet default local schedule end in HH:MM")
 	coordinatorURL := fs.String("coordinator", firstNonEmpty(os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "http://127.0.0.1:8080"), "coordinator base URL")
@@ -258,12 +265,14 @@ func fleetCreate(args []string) error {
 		ID             string `json:"id"`
 		OrganizationID string `json:"organization_id"`
 		Name           string `json:"name"`
+		Region         string `json:"region"`
 		ScheduleFrom   string `json:"schedule_from"`
 		ScheduleUntil  string `json:"schedule_until"`
 	}
 	err := postAdminJSON(*coordinatorURL+"/internal/v1/fleets", *operatorToken, map[string]string{
 		"org_id":         *orgID,
 		"name":           *name,
+		"region":         *region,
 		"schedule_from":  *scheduleFrom,
 		"schedule_until": *scheduleUntil,
 	}, &resp)
@@ -271,9 +280,42 @@ func fleetCreate(args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stdout, "fleet_id: %s\norg_id: %s\nname: %s\n", resp.ID, resp.OrganizationID, resp.Name)
+	if resp.Region != "" {
+		fmt.Fprintf(os.Stdout, "region: %s\n", resp.Region)
+	}
 	if resp.ScheduleFrom != "" || resp.ScheduleUntil != "" {
 		fmt.Fprintf(os.Stdout, "schedule: %s-%s\n", resp.ScheduleFrom, resp.ScheduleUntil)
 	}
+	return nil
+}
+
+func fleetSetRegion(args []string) error {
+	fs := flag.NewFlagSet("fleet set-region", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fleetID := fs.String("fleet", "", "fleet id")
+	region := fs.String("region", "", "region code; empty clears the region")
+	reason := fs.String("reason", "operator region update", "audit reason")
+	coordinatorURL := fs.String("coordinator", firstNonEmpty(os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "http://127.0.0.1:8080"), "coordinator base URL")
+	operatorToken := fs.String("operator-token", os.Getenv("THIRDSHIFT_OPERATOR_TOKEN"), "operator bearer token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *fleetID == "" {
+		return fmt.Errorf("--fleet is required")
+	}
+	if *operatorToken == "" {
+		return fmt.Errorf("operator token is required; set THIRDSHIFT_OPERATOR_TOKEN or pass --operator-token")
+	}
+	var resp struct {
+		Status  string `json:"status"`
+		FleetID string `json:"fleet_id"`
+		Region  string `json:"region"`
+	}
+	endpoint := strings.TrimRight(*coordinatorURL, "/") + "/internal/v1/fleets/" + url.PathEscape(*fleetID) + "/region"
+	if err := postAdminJSON(endpoint, *operatorToken, map[string]string{"region": *region, "reason": *reason}, &resp); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "fleet_id: %s\nregion: %s\nstatus: %s\n", resp.FleetID, resp.Region, resp.Status)
 	return nil
 }
 
@@ -319,6 +361,48 @@ func fleetReport(args []string) error {
 	}
 	_, err = os.Stdout.Write(body)
 	return err
+}
+
+func node(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("node command is required\n\n%s", usageText())
+	}
+	switch args[0] {
+	case "set-region":
+		return nodeSetRegion(args[1:])
+	default:
+		return fmt.Errorf("unknown node command %q\n\n%s", args[0], usageText())
+	}
+}
+
+func nodeSetRegion(args []string) error {
+	fs := flag.NewFlagSet("node set-region", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	nodeID := fs.String("node", "", "node id")
+	region := fs.String("region", "", "region code; empty clears the node override")
+	reason := fs.String("reason", "operator region update", "audit reason")
+	coordinatorURL := fs.String("coordinator", firstNonEmpty(os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "http://127.0.0.1:8080"), "coordinator base URL")
+	operatorToken := fs.String("operator-token", os.Getenv("THIRDSHIFT_OPERATOR_TOKEN"), "operator bearer token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *nodeID == "" {
+		return fmt.Errorf("--node is required")
+	}
+	if *operatorToken == "" {
+		return fmt.Errorf("operator token is required; set THIRDSHIFT_OPERATOR_TOKEN or pass --operator-token")
+	}
+	var resp struct {
+		Status string `json:"status"`
+		NodeID string `json:"node_id"`
+		Region string `json:"region"`
+	}
+	endpoint := strings.TrimRight(*coordinatorURL, "/") + "/internal/v1/nodes/" + url.PathEscape(*nodeID) + "/region"
+	if err := postAdminJSON(endpoint, *operatorToken, map[string]string{"region": *region, "reason": *reason}, &resp); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "node_id: %s\nregion: %s\nstatus: %s\n", resp.NodeID, resp.Region, resp.Status)
+	return nil
 }
 
 func nodes(args []string) error {
@@ -387,6 +471,101 @@ func nodesList(args []string) error {
 		fmt.Fprintf(os.Stdout, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%t\t%t\n", node.ID, node.State, node.SessionStatus, age, model, schedule, thermal, node.Paused, node.Draining)
 	}
 	return nil
+}
+
+func waitlist(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("waitlist command is required\n\n%s", usageText())
+	}
+	switch args[0] {
+	case "list":
+		return waitlistList(args[1:])
+	case "export":
+		return waitlistExport(args[1:])
+	default:
+		return fmt.Errorf("unknown waitlist command %q\n\n%s", args[0], usageText())
+	}
+}
+
+func waitlistList(args []string) error {
+	fs := flag.NewFlagSet("waitlist list", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	coordinatorURL := fs.String("coordinator", firstNonEmpty(os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "http://127.0.0.1:8080"), "coordinator base URL")
+	operatorToken := fs.String("operator-token", os.Getenv("THIRDSHIFT_OPERATOR_TOKEN"), "operator bearer token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *operatorToken == "" {
+		return fmt.Errorf("operator token is required; set THIRDSHIFT_OPERATOR_TOKEN or pass --operator-token")
+	}
+	var resp struct {
+		Signups []struct {
+			Email          string    `json:"email"`
+			Name           string    `json:"name"`
+			UseCase        string    `json:"use_case"`
+			ExpectedVolume string    `json:"expected_volume"`
+			DataAck        bool      `json:"data_ack"`
+			ModelID        string    `json:"model_id"`
+			Source         string    `json:"source"`
+			CreatedAt      time.Time `json:"created_at"`
+			LastAppliedAt  time.Time `json:"last_applied_at"`
+		} `json:"signups"`
+	}
+	if err := getAdminJSON(strings.TrimRight(*coordinatorURL, "/")+"/internal/v1/waitlist", *operatorToken, &resp); err != nil {
+		return err
+	}
+	if len(resp.Signups) == 0 {
+		fmt.Fprintln(os.Stdout, "no access applications")
+		return nil
+	}
+	fmt.Fprintln(os.Stdout, "EMAIL\tNAME\tMODEL\tVOLUME\tDATA_ACK\tSOURCE\tLAST_APPLIED_AT\tUSE_CASE")
+	for _, signup := range resp.Signups {
+		fmt.Fprintf(os.Stdout, "%s\t%s\t%s\t%s\t%t\t%s\t%s\t%s\n",
+			signup.Email,
+			dashIfEmpty(signup.Name),
+			dashIfEmpty(signup.ModelID),
+			dashIfEmpty(signup.ExpectedVolume),
+			signup.DataAck,
+			signup.Source,
+			signup.LastAppliedAt.Format(time.RFC3339),
+			dashIfEmpty(signup.UseCase),
+		)
+	}
+	return nil
+}
+
+func dashIfEmpty(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
+}
+
+func waitlistExport(args []string) error {
+	fs := flag.NewFlagSet("waitlist export", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	outPath := fs.String("out", "", "optional output CSV path; stdout when omitted")
+	coordinatorURL := fs.String("coordinator", firstNonEmpty(os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "http://127.0.0.1:8080"), "coordinator base URL")
+	operatorToken := fs.String("operator-token", os.Getenv("THIRDSHIFT_OPERATOR_TOKEN"), "operator bearer token")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *operatorToken == "" {
+		return fmt.Errorf("operator token is required; set THIRDSHIFT_OPERATOR_TOKEN or pass --operator-token")
+	}
+	body, err := getAdminRaw(strings.TrimRight(*coordinatorURL, "/")+"/internal/v1/waitlist/export", *operatorToken)
+	if err != nil {
+		return err
+	}
+	if *outPath != "" {
+		if err := os.WriteFile(*outPath, body, 0o600); err != nil {
+			return fmt.Errorf("write waitlist CSV: %w", err)
+		}
+		fmt.Fprintf(os.Stdout, "waitlist_export: %s\n", *outPath)
+		return nil
+	}
+	_, err = os.Stdout.Write(body)
+	return err
 }
 
 func credits(args []string) error {
@@ -646,7 +825,7 @@ func usage() error {
 }
 
 func usageText() string {
-	return "admin-cli commands:\n  migrate [--database-url URL] [--migrations-dir migrations]\n  org create --name <name> [--coordinator URL]\n  catalog sync [--catalog-dir models/catalog] [--coordinator URL]\n  apikey create --org <org_id> [--model <model_id>] [--coordinator URL]\n  invite create --fleet <fleet_id> [--coordinator URL]\n  fleet create --org <org_id> --name <name> [--schedule-from HH:MM --schedule-until HH:MM] [--coordinator URL]\n  fleet report --fleet <fleet_id> [--from RFC3339] [--to RFC3339] [--out report.csv] [--coordinator URL]\n  nodes list [--coordinator URL]\n  credits release [--database-url URL]\n  payout create [--org <org_id>] [--database-url URL]\n  payout export --batch <batch_id> [--out paid.csv] [--database-url URL]\n  payout confirm --batch <batch_id> --file paid.csv [--database-url URL]\n  payout void --batch <batch_id> [--reason text] [--database-url URL]\n  report economics [--from RFC3339] [--until RFC3339] [--database-url URL]\n"
+	return "admin-cli commands:\n  migrate [--database-url URL] [--migrations-dir migrations]\n  org create --name <name> [--coordinator URL]\n  catalog sync [--catalog-dir models/catalog] [--coordinator URL]\n  apikey create --org <org_id> [--model <model_id>] [--coordinator URL]\n  invite create --fleet <fleet_id> [--coordinator URL]\n  fleet create --org <org_id> --name <name> [--region in-south] [--schedule-from HH:MM --schedule-until HH:MM] [--coordinator URL]\n  fleet set-region --fleet <fleet_id> --region <region> [--coordinator URL]\n  fleet report --fleet <fleet_id> [--from RFC3339] [--to RFC3339] [--out report.csv] [--coordinator URL]\n  node set-region --node <node_id> --region <region> [--coordinator URL]\n  nodes list [--coordinator URL]\n  waitlist list [--coordinator URL]\n  waitlist export [--out waitlist.csv] [--coordinator URL]\n  credits release [--database-url URL]\n  payout create [--org <org_id>] [--database-url URL]\n  payout export --batch <batch_id> [--out paid.csv] [--database-url URL]\n  payout confirm --batch <batch_id> --file paid.csv [--database-url URL]\n  payout void --batch <batch_id> [--reason text] [--database-url URL]\n  report economics [--from RFC3339] [--until RFC3339] [--database-url URL]\n"
 }
 
 type multiFlag []string

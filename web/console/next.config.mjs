@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const configuredBasePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+const coordinatorURL = process.env.THIRDSHIFT_COORDINATOR_URL || "";
 
 const nextConfig = {
   output: "standalone",
@@ -12,6 +13,19 @@ const nextConfig = {
 
 if (configuredBasePath) {
   nextConfig.basePath = configuredBasePath;
+}
+
+if (coordinatorURL) {
+  nextConfig.rewrites = async () => [
+    {
+      source: "/v1/:path*",
+      destination: `${coordinatorURL.replace(/\/$/, "")}/v1/:path*`
+    },
+    {
+      source: "/internal/:path*",
+      destination: `${coordinatorURL.replace(/\/$/, "")}/internal/:path*`
+    }
+  ];
 }
 
 export default nextConfig;
