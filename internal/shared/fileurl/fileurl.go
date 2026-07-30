@@ -5,8 +5,36 @@ import (
 	"net/url"
 	slashpath "path"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 )
+
+// ToPath converts a parsed file URL back into a local OS path,
+// handling Windows drive paths (file:///C:/x) and UNC hosts.
+func ToPath(parsed *url.URL) string {
+	return toPathFor(goruntime.GOOS, parsed)
+}
+
+func toPathFor(goos string, parsed *url.URL) string {
+	if parsed.Host != "" && parsed.Host != "localhost" {
+		if goos == "windows" {
+			return `\\` + parsed.Host + filepath.FromSlash(parsed.Path)
+		}
+		return filepath.Join(string(filepath.Separator)+parsed.Host, filepath.FromSlash(parsed.Path))
+	}
+	path := parsed.Path
+	if goos == "windows" && len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+		path = path[1:]
+	}
+	return filepath.FromSlash(path)
+}
+
+// IsLocalRawURL reports whether a raw artifact reference should be
+// treated as a local OS path rather than a network URL. Bare paths
+// have no scheme; Windows drive paths parse with a one-letter scheme.
+func IsLocalRawURL(parsed *url.URL) bool {
+	return parsed.Scheme == "" || len(parsed.Scheme) == 1
+}
 
 // FromPath converts a local OS path into a standards-compliant file URL.
 func FromPath(filename string) (string, error) {

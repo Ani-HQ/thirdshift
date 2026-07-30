@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+
+	"github.com/Ani-HQ/thirdshift/internal/shared/fileurl"
 	"os"
 	"path/filepath"
 	"sort"
@@ -63,9 +65,9 @@ func (c Cache) Ensure(ctx context.Context, artifact Artifact, activeSHA256 strin
 func (c Cache) downloadResumable(ctx context.Context, rawurl, dest string, expectedSize int64) error {
 	parsed, err := url.Parse(rawurl)
 	if err == nil && parsed.Scheme == "file" {
-		return copyModelFile(parsed.Path, dest)
+		return copyModelFile(fileurl.ToPath(parsed), dest)
 	}
-	if err == nil && parsed.Scheme == "" {
+	if err == nil && fileurl.IsLocalRawURL(parsed) {
 		return copyModelFile(rawurl, dest)
 	}
 

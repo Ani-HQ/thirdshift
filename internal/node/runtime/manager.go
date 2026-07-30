@@ -15,6 +15,8 @@ import (
 	goruntime "runtime"
 	"strings"
 	"time"
+
+	"github.com/Ani-HQ/thirdshift/internal/shared/fileurl"
 )
 
 type Manager struct {
@@ -207,9 +209,9 @@ func writeJSON(path string, value any) error {
 func downloadFile(ctx context.Context, client *http.Client, rawurl, dest string) error {
 	parsed, err := url.Parse(rawurl)
 	if err == nil && parsed.Scheme == "file" {
-		return copyLocalFile(localPathFromFileURL(parsed), dest)
+		return copyLocalFile(fileurl.ToPath(parsed), dest)
 	}
-	if err == nil && parsed.Scheme == "" {
+	if err == nil && fileurl.IsLocalRawURL(parsed) {
 		return copyLocalFile(rawurl, dest)
 	}
 
@@ -234,20 +236,6 @@ func downloadFile(ctx context.Context, client *http.Client, rawurl, dest string)
 		return fmt.Errorf("write runtime artifact temp file: %w", err)
 	}
 	return nil
-}
-
-func localPathFromFileURL(parsed *url.URL) string {
-	if parsed.Host != "" && parsed.Host != "localhost" {
-		if goruntime.GOOS == "windows" {
-			return `\\` + parsed.Host + filepath.FromSlash(parsed.Path)
-		}
-		return filepath.Join(string(filepath.Separator)+parsed.Host, filepath.FromSlash(parsed.Path))
-	}
-	path := parsed.Path
-	if goruntime.GOOS == "windows" && len(path) >= 3 && path[0] == '/' && path[2] == ':' {
-		path = path[1:]
-	}
-	return filepath.FromSlash(path)
 }
 
 func copyLocalFile(src, dest string) error {
