@@ -100,8 +100,8 @@ VALUES ($1, $2, $3, 'OFFLINE', now(), now())
 		t.Fatalf("node region = %q, want us-west", nodeRegion)
 	}
 	if _, err := pool.Exec(ctx, `
-INSERT INTO waitlist_signups (id, email, use_case, source, created_at)
-VALUES ('wait_01K0M000000000000000000010', 'cli@example.com', 'CLI export', 'test', now())
+INSERT INTO waitlist_signups (id, email, name, use_case, expected_volume, data_ack, model_id, source, created_at)
+VALUES ('wait_01K0M000000000000000000010', 'cli@example.com', 'CLI Applicant', 'CLI export', '10m_100m', true, 'qwen2.5-7b-instruct', 'test', now())
 `); err != nil {
 		t.Fatalf("seed waitlist: %v", err)
 	}
@@ -118,8 +118,13 @@ VALUES ('wait_01K0M000000000000000000010', 'cli@example.com', 'CLI export', 'tes
 	if err != nil {
 		t.Fatalf("parse waitlist csv: %v", err)
 	}
-	if len(waitlistRecords) < 2 || strings.Join(waitlistRecords[0], ",") != "id,email,use_case,source,created_at" {
-		t.Fatalf("unexpected waitlist records: %#v", waitlistRecords)
+	if len(waitlistRecords) < 2 ||
+		strings.Join(waitlistRecords[0], ",") != "id,email,name,use_case,expected_volume,data_ack,model_id,source,created_at" {
+		t.Fatalf("unexpected waitlist header: %#v", waitlistRecords)
+	}
+	if got := strings.Join(waitlistRecords[1][:7], ","); got !=
+		"wait_01K0M000000000000000000010,cli@example.com,CLI Applicant,CLI export,10m_100m,true,qwen2.5-7b-instruct" {
+		t.Fatalf("unexpected waitlist row: %q", got)
 	}
 	if err := run([]string{"waitlist", "list", "--coordinator", server.URL, "--operator-token", "operator-token"}); err != nil {
 		t.Fatalf("waitlist list command: %v", err)

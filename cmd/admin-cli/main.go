@@ -500,24 +500,44 @@ func waitlistList(args []string) error {
 	}
 	var resp struct {
 		Signups []struct {
-			Email     string    `json:"email"`
-			UseCase   string    `json:"use_case"`
-			Source    string    `json:"source"`
-			CreatedAt time.Time `json:"created_at"`
+			Email          string    `json:"email"`
+			Name           string    `json:"name"`
+			UseCase        string    `json:"use_case"`
+			ExpectedVolume string    `json:"expected_volume"`
+			DataAck        bool      `json:"data_ack"`
+			ModelID        string    `json:"model_id"`
+			Source         string    `json:"source"`
+			CreatedAt      time.Time `json:"created_at"`
 		} `json:"signups"`
 	}
 	if err := getAdminJSON(strings.TrimRight(*coordinatorURL, "/")+"/internal/v1/waitlist", *operatorToken, &resp); err != nil {
 		return err
 	}
 	if len(resp.Signups) == 0 {
-		fmt.Fprintln(os.Stdout, "no waitlist signups")
+		fmt.Fprintln(os.Stdout, "no access applications")
 		return nil
 	}
-	fmt.Fprintln(os.Stdout, "EMAIL\tSOURCE\tCREATED_AT\tUSE_CASE")
+	fmt.Fprintln(os.Stdout, "EMAIL\tNAME\tMODEL\tVOLUME\tDATA_ACK\tSOURCE\tCREATED_AT\tUSE_CASE")
 	for _, signup := range resp.Signups {
-		fmt.Fprintf(os.Stdout, "%s\t%s\t%s\t%s\n", signup.Email, signup.Source, signup.CreatedAt.Format(time.RFC3339), signup.UseCase)
+		fmt.Fprintf(os.Stdout, "%s\t%s\t%s\t%s\t%t\t%s\t%s\t%s\n",
+			signup.Email,
+			dashIfEmpty(signup.Name),
+			dashIfEmpty(signup.ModelID),
+			dashIfEmpty(signup.ExpectedVolume),
+			signup.DataAck,
+			signup.Source,
+			signup.CreatedAt.Format(time.RFC3339),
+			dashIfEmpty(signup.UseCase),
+		)
 	}
 	return nil
+}
+
+func dashIfEmpty(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
 }
 
 func waitlistExport(args []string) error {

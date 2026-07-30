@@ -6,6 +6,14 @@
 - Added fleet/node aggregate region fields and operator commands for region assignment without exposing host or per-node details publicly.
 - Added unauthenticated developer waitlist signup plus operator waitlist list/export commands.
 - Reworked the public console `/status` route into a model-first catalog and network status page with waitlist capture.
+- Added demand-first catalog listing semantics: a manifest `listing` block, `models.listing_status`, and `/v1/status` support for `waitlist` and `hidden` models via migration `000009`.
+- Added pinned `qwen2.5-7b-instruct`, `qwen2.5-coder-7b-instruct`, and `llama-3.2-3b-instruct` manifests with verified Q4_K_M GGUF revisions, sizes, and SHA-256 hashes, listed as available on request.
+- Hid `thirdshift-tiny-chat-v1` from the public catalog while keeping it routable for internal testing.
+- Replaced the waitlist form with a reviewed access application: required use case and data-class acknowledgment, optional name and expected monthly volume, requested model, and the new fields in `admin-cli waitlist list/export`.
+- Added market price comparison and a rounded cheaper tag to public model rows, sourced from manifest `listing.market_comparison`.
+- Rethemed the public `/status` page to a light minimalist layout with hairline model rows and honest waitlist states; the operator console is unchanged.
+- Fixed a data race in the shared protocol validator's schema cache, which could crash the coordinator with a concurrent map write when several node sessions validated a new message type at the same time.
+- Raised the integration test wall-clock budgets so a saturated machine running `go test -tags integration ./...` no longer fails scheduling waits that were merely slow.
 
 ## 0.1.0-alpha - 2026-07-30
 

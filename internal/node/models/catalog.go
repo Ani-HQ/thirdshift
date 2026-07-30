@@ -9,12 +9,21 @@ import (
 	"strings"
 )
 
+// Listing status values describe how a model is presented on the public
+// catalog. They are independent of the operational lifecycle in Status.
+const (
+	ListingLive     = "live"
+	ListingWaitlist = "waitlist"
+	ListingHidden   = "hidden"
+)
+
 type Manifest struct {
 	SchemaVersion int
 	ModelID       string
 	DisplayName   string
 	Description   string
 	Status        string
+	Listing       Listing
 	Source        Source
 	License       License
 	Runtime       Runtime
@@ -24,6 +33,42 @@ type Manifest struct {
 	Policy        Policy
 	Pricing       Pricing
 	Verification  Verification
+}
+
+type Listing struct {
+	Status                        string
+	Description                   string
+	ExpectedOutputTokensPerSecond *float64
+	MarketComparison              *MarketComparison
+}
+
+type MarketComparison struct {
+	TypicalInputPerMillionUSD  float64
+	TypicalOutputPerMillionUSD float64
+	SourceNote                 string
+}
+
+// ListingStatus returns the normalized public listing status, defaulting to
+// live so manifests written before the listing block keep their behavior.
+func (m Manifest) ListingStatus() string {
+	switch m.Listing.Status {
+	case ListingWaitlist:
+		return ListingWaitlist
+	case ListingHidden:
+		return ListingHidden
+	default:
+		return ListingLive
+	}
+}
+
+// CatalogDescription returns the manifest's public one-liner, preferring the
+// listing block over the legacy top-level description. It stays empty when the
+// manifest has neither so readers can fall back to the display name.
+func (m Manifest) CatalogDescription() string {
+	if m.Listing.Description != "" {
+		return m.Listing.Description
+	}
+	return m.Description
 }
 
 type Source struct {
@@ -183,6 +228,16 @@ func parseManifest(s scanner) (Manifest, error) {
 	if manifest.Source.SHA256 == "" {
 		return Manifest{}, fmt.Errorf("model manifest %s is missing source.sha256", manifest.ModelID)
 	}
+	switch manifest.Listing.Status {
+	case "", ListingLive, ListingWaitlist, ListingHidden:
+	default:
+		return Manifest{}, fmt.Errorf("model manifest %s has unknown listing.status %q", manifest.ModelID, manifest.Listing.Status)
+	}
+	if comparison := manifest.Listing.MarketComparison; comparison != nil {
+		if comparison.TypicalInputPerMillionUSD <= 0 || comparison.TypicalOutputPerMillionUSD <= 0 {
+			return Manifest{}, fmt.Errorf("model manifest %s listing.market_comparison needs positive typical prices", manifest.ModelID)
+		}
+	}
 	return manifest, nil
 }
 
@@ -228,6 +283,19 @@ func assignSection(manifest *Manifest, section, key, value string) error {
 				return fmt.Errorf("source.size_bytes must be an integer: %w", err)
 			}
 			manifest.Source.SizeBytes = parsed
+		}
+	case "listing":
+		switch key {
+		case "status":
+			manifest.Listing.Status = value
+		case "description":
+			manifest.Listing.Description = value
+		case "expected_output_tokens_per_second":
+			parsed, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return fmt.Errorf("listing.expected_output_tokens_per_second must be a number: %w", err)
+			}
+			manifest.Listing.ExpectedOutputTokensPerSecond = &parsed
 		}
 	case "license":
 		switch key {
@@ -326,6 +394,9 @@ func assignSection(manifest *Manifest, section, key, value string) error {
 }
 
 func assignSubsection(manifest *Manifest, section, subsection, key, value string) error {
+	if section == "listing" && subsection == "market_comparison" {
+		return assignMarketComparison(manifest, key, value)
+	}
 	if section != "runtime" || subsection != "arguments" {
 		return nil
 	}
@@ -356,6 +427,28 @@ func assignSubsection(manifest *Manifest, section, subsection, key, value string
 		manifest.Runtime.Arguments.Host = value
 	case "port":
 		manifest.Runtime.Arguments.Port = value
+	}
+	return nil
+}
+
+func assignMarketComparison(manifest *Manifest, key, value string) error {
+	if manifest.Listing.MarketComparison == nil {
+		manifest.Listing.MarketComparison = &MarketComparison{}
+	}
+	comparison := manifest.Listing.MarketComparison
+	if key == "source_note" {
+		comparison.SourceNote = value
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fmt.Errorf("listing.market_comparison.%s must be a number: %w", key, err)
+	}
+	switch key {
+	case "typical_input_per_million_usd":
+		comparison.TypicalInputPerMillionUSD = parsed
+	case "typical_output_per_million_usd":
+		comparison.TypicalOutputPerMillionUSD = parsed
 	}
 	return nil
 }

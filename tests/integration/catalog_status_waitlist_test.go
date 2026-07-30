@@ -20,6 +20,11 @@ func TestPublicCatalogStatusModelsPricingMedianAndRegions(t *testing.T) {
 	configureM5Model(t, env, 1_000_000, 2_000_000, 500_000, 0)
 	seedOfflineCatalogModel(t, env)
 	seedAcceptedResultForMedian(t, env, "thirdshift-tiny-chat-v1", 30, 2000)
+	// The tiny model ships as listing.status hidden. Listing it for the live
+	// assertions keeps this test focused on measured supply; the hidden path
+	// is asserted at the end and in
+	// TestPublicStatusListsWaitlistModelsAndHidesInternalModel.
+	setListingStatus(t, env, "thirdshift-tiny-chat-v1", "live")
 
 	runtime := newM4Runtime("catalog: ")
 	defer runtime.close()
@@ -69,28 +74,168 @@ func TestPublicCatalogStatusModelsPricingMedianAndRegions(t *testing.T) {
 	if offline.Availability.State != "offline" || offline.Availability.AvailableNodes != 0 || len(offline.Regions) != 0 {
 		t.Fatalf("offline model availability = %#v regions=%#v", offline.Availability, offline.Regions)
 	}
+	if offline.MarketComparison != nil {
+		t.Fatalf("offline fixture model has a market comparison: %#v", offline.MarketComparison)
+	}
+
+	setListingStatus(t, env, "thirdshift-tiny-chat-v1", "hidden")
+	hiddenStatus, err := env.operator.PublicStatus(env.ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("store public status after hiding tiny: %v", err)
+	}
+	for _, model := range hiddenStatus.Models {
+		if model.ModelID == "thirdshift-tiny-chat-v1" {
+			t.Fatal("hidden model is still published on /v1/status")
+		}
+	}
 }
 
-func TestPublicWaitlistValidationDuplicateAndRateLimit(t *testing.T) {
+func TestPublicStatusListsWaitlistModelsAndHidesInternalModel(t *testing.T) {
 	env := newM4Env(t, ioDiscard{})
 	defer env.close()
 
-	first := postWaitlist(t, env, "dev@example.com", "alpha catalog", http.StatusOK)
-	if first.Duplicate {
-		t.Fatal("first signup marked duplicate")
-	}
-	duplicate := postWaitlist(t, env, "DEV@example.com", "same developer", http.StatusOK)
-	if !duplicate.Duplicate {
-		t.Fatal("duplicate signup did not return duplicate=true")
-	}
-	postWaitlistRaw(t, env, []byte(`{"email":"not-an-email"}`), http.StatusBadRequest)
+	status := publicStatus(t, env, "", "")
 
-	for i := 0; i < 5; i++ {
+	for _, model := range status.Models {
+		if model.ModelID == "thirdshift-tiny-chat-v1" {
+			t.Fatalf("hidden internal model appears in public status: %#v", model)
+		}
+	}
+
+	for modelID, expectedSpeed := range map[string]float64{
+		"qwen2.5-7b-instruct":       30,
+		"qwen2.5-coder-7b-instruct": 30,
+		"llama-3.2-3b-instruct":     60,
+	} {
+		model := findPublicModel(t, status, modelID)
+		if model.ListingStatus != "waitlist" {
+			t.Fatalf("%s listing_status = %q, want waitlist", modelID, model.ListingStatus)
+		}
+		if model.Availability.State != "waitlist" {
+			t.Fatalf("%s availability state = %q, want waitlist", modelID, model.Availability.State)
+		}
+		if model.Availability.AvailableNodes != 0 {
+			t.Fatalf("%s reports %d available nodes with no supply", modelID, model.Availability.AvailableNodes)
+		}
+		if len(model.Regions) != 0 {
+			t.Fatalf("%s reports regions %#v with no supply", modelID, model.Regions)
+		}
+		if model.TypicalOutputTokensPerSecond != nil {
+			t.Fatalf("%s reports a measured speed with no supply: %v", modelID, *model.TypicalOutputTokensPerSecond)
+		}
+		if model.ExpectedOutputTokensPerSecond == nil || *model.ExpectedOutputTokensPerSecond != expectedSpeed {
+			t.Fatalf("%s expected speed = %v, want %v", modelID, model.ExpectedOutputTokensPerSecond, expectedSpeed)
+		}
+		if model.Description == "" || model.Description == model.DisplayName {
+			t.Fatalf("%s has no listing description: %q", modelID, model.Description)
+		}
+		if model.MarketComparison == nil {
+			t.Fatalf("%s is missing its market comparison", modelID)
+		}
+		if model.MarketComparison.TypicalInputPerMillionMicrodollars <= model.Price.InputPerMillionMicrodollars {
+			t.Fatalf("%s market comparison is not above our price: %#v", modelID, model.MarketComparison)
+		}
+		if model.MarketComparison.SourceNote == "" {
+			t.Fatalf("%s market comparison has no source note", modelID)
+		}
+	}
+
+	qwen := findPublicModel(t, status, "qwen2.5-7b-instruct")
+	if qwen.Price.InputPerMillionMicrodollars != 30_000 || qwen.Price.OutputPerMillionMicrodollars != 80_000 {
+		t.Fatalf("qwen price = %#v, want 30000/80000 microdollars", qwen.Price)
+	}
+	if qwen.MarketComparison.TypicalInputPerMillionMicrodollars != 40_000 ||
+		qwen.MarketComparison.TypicalOutputPerMillionMicrodollars != 100_000 {
+		t.Fatalf("qwen market comparison = %#v, want 40000/100000 microdollars", qwen.MarketComparison)
+	}
+}
+
+func TestPublicAccessApplicationRequiresUseCaseAndAcknowledgment(t *testing.T) {
+	env := newM4Env(t, ioDiscard{})
+	defer env.close()
+
+	postWaitlistRaw(t, env, []byte(`{"email":"dev@example.com","data_ack":true}`), http.StatusBadRequest)
+	postWaitlistRaw(t, env, []byte(`{"email":"dev@example.com","use_case":"Batch summaries"}`), http.StatusBadRequest)
+	postWaitlistRaw(t, env, []byte(`{"email":"dev@example.com","use_case":"Batch summaries","data_ack":false}`), http.StatusBadRequest)
+	postWaitlistRaw(t, env, []byte(`{"email":"not-an-email","use_case":"Batch summaries","data_ack":true}`), http.StatusBadRequest)
+	postWaitlistRaw(t, env, []byte(`{"email":"dev@example.com","use_case":"Batch summaries","data_ack":true,"expected_volume":"loads"}`), http.StatusBadRequest)
+
+	created := postApplication(t, env, accessApplication{
+		Email:          "dev@example.com",
+		Name:           "Dev Example",
+		UseCase:        "Nightly batch summaries for an internal tool",
+		ExpectedVolume: "1m_10m",
+		DataAck:        true,
+		ModelID:        "qwen2.5-7b-instruct",
+	}, http.StatusOK)
+	if created.Duplicate {
+		t.Fatal("first application reported duplicate")
+	}
+	repeat := postApplication(t, env, accessApplication{
+		Email:   "DEV@example.com",
+		UseCase: "Same developer applying again",
+		DataAck: true,
+	}, http.StatusOK)
+	if !repeat.Duplicate {
+		t.Fatal("repeat application did not report duplicate")
+	}
+
+	listed := operatorGetRaw(t, env, "/internal/v1/waitlist", "operator-token")
+	if listed.status != http.StatusOK {
+		t.Fatalf("waitlist list status=%d body=%s", listed.status, string(listed.body))
+	}
+	var listResponse struct {
+		Signups []operatorstore.WaitlistSignup `json:"signups"`
+	}
+	if err := json.Unmarshal(listed.body, &listResponse); err != nil {
+		t.Fatalf("decode waitlist list: %v", err)
+	}
+	if len(listResponse.Signups) != 1 {
+		t.Fatalf("waitlist rows = %d, want 1", len(listResponse.Signups))
+	}
+	signup := listResponse.Signups[0]
+	if signup.Email != "dev@example.com" || signup.Name != "Dev Example" ||
+		signup.UseCase != "Nightly batch summaries for an internal tool" ||
+		signup.ExpectedVolume != "1m_10m" || !signup.DataAck || signup.ModelID != "qwen2.5-7b-instruct" {
+		t.Fatalf("stored application = %#v", signup)
+	}
+
+	exported := operatorGetRaw(t, env, "/internal/v1/waitlist/export", "operator-token")
+	if exported.status != http.StatusOK {
+		t.Fatalf("waitlist export status=%d body=%s", exported.status, string(exported.body))
+	}
+	csvBody := string(exported.body)
+	if !strings.HasPrefix(csvBody, "id,email,name,use_case,expected_volume,data_ack,model_id,source,created_at") {
+		t.Fatalf("waitlist CSV header = %q", csvBody)
+	}
+	for _, want := range []string{"Dev Example", "1m_10m", "true", "qwen2.5-7b-instruct"} {
+		if !strings.Contains(csvBody, want) {
+			t.Fatalf("waitlist CSV missing %q: %s", want, csvBody)
+		}
+	}
+}
+
+func TestPublicApplicationRateLimit(t *testing.T) {
+	env := newM4Env(t, ioDiscard{})
+	defer env.close()
+
+	for i := 0; i < 6; i++ {
 		want := http.StatusOK
-		if i == 4 {
+		if i >= 5 {
 			want = http.StatusTooManyRequests
 		}
-		postWaitlistRaw(t, env, []byte(`{"email":"rate`+string(rune('a'+i))+`@example.com"}`), want)
+		postApplication(t, env, accessApplication{
+			Email:   "rate" + string(rune('a'+i)) + "@example.com",
+			UseCase: "Load testing the application form",
+			DataAck: true,
+		}, want)
+	}
+}
+
+func setListingStatus(t *testing.T, env *m4Env, modelID, listingStatus string) {
+	t.Helper()
+	if _, err := env.pool.Exec(env.ctx, "UPDATE models SET listing_status = $2 WHERE id = $1", modelID, listingStatus); err != nil {
+		t.Fatalf("set listing status for %s: %v", modelID, err)
 	}
 }
 
@@ -129,22 +274,33 @@ func findPublicModel(t *testing.T, status operatorstore.PublicStatus, modelID st
 	return operatorstore.PublicModelStatus{}
 }
 
-func postWaitlist(t *testing.T, env *m4Env, email, useCase string, wantStatus int) struct {
+type accessApplication struct {
+	Email          string `json:"email"`
+	Name           string `json:"name,omitempty"`
+	UseCase        string `json:"use_case"`
+	ExpectedVolume string `json:"expected_volume,omitempty"`
+	DataAck        bool   `json:"data_ack"`
+	ModelID        string `json:"model_id,omitempty"`
+}
+
+type accessApplicationResponse struct {
 	Status    string `json:"status"`
 	Duplicate bool   `json:"duplicate"`
-} {
+}
+
+func postApplication(t *testing.T, env *m4Env, application accessApplication, wantStatus int) accessApplicationResponse {
 	t.Helper()
-	body, err := json.Marshal(map[string]string{"email": email, "use_case": useCase})
+	body, err := json.Marshal(application)
 	if err != nil {
-		t.Fatalf("marshal waitlist: %v", err)
+		t.Fatalf("marshal application: %v", err)
 	}
 	raw := postWaitlistRaw(t, env, body, wantStatus)
-	var decoded struct {
-		Status    string `json:"status"`
-		Duplicate bool   `json:"duplicate"`
+	var decoded accessApplicationResponse
+	if wantStatus != http.StatusOK {
+		return decoded
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("decode waitlist response: %v", err)
+		t.Fatalf("decode application response: %v", err)
 	}
 	return decoded
 }

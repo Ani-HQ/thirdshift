@@ -38,6 +38,31 @@ const (
 	defaultRecentListSize = 100
 )
 
+// Public listing statuses mirror the catalog manifest listing block and the
+// models.listing_status column.
+const (
+	ListingLive     = "live"
+	ListingWaitlist = "waitlist"
+	ListingHidden   = "hidden"
+)
+
+// Public availability states. Only the first three describe measured supply;
+// waitlist means the model is offered for applications with no supply yet.
+const (
+	AvailabilityAvailable = "available"
+	AvailabilityLimited   = "limited"
+	AvailabilityOffline   = "offline"
+	AvailabilityWaitlist  = "waitlist"
+)
+
+// Expected monthly output volume bands collected on the access application.
+var expectedVolumeBands = map[string]bool{
+	"lt_1m":    true,
+	"1m_10m":   true,
+	"10m_100m": true,
+	"gt_100m":  true,
+}
+
 var regionPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 type Store struct {
@@ -270,17 +295,29 @@ type PublicStatus struct {
 }
 
 type PublicModelStatus struct {
-	ModelID                      string                  `json:"model_id"`
-	DisplayName                  string                  `json:"display_name"`
-	Description                  string                  `json:"description"`
-	Capabilities                 []string                `json:"capabilities"`
-	Price                        PublicModelPrice        `json:"price"`
-	DataClass                    string                  `json:"data_class"`
-	Limits                       PublicModelLimits       `json:"limits"`
-	Availability                 PublicModelAvailability `json:"availability"`
-	TypicalOutputTokensPerSecond *float64                `json:"typical_output_tokens_per_second"`
-	Regions                      []string                `json:"regions"`
-	Version                      string                  `json:"version"`
+	ModelID                       string                       `json:"model_id"`
+	DisplayName                   string                       `json:"display_name"`
+	Description                   string                       `json:"description"`
+	ListingStatus                 string                       `json:"listing_status"`
+	Capabilities                  []string                     `json:"capabilities"`
+	Price                         PublicModelPrice             `json:"price"`
+	MarketComparison              *PublicModelMarketComparison `json:"market_comparison"`
+	DataClass                     string                       `json:"data_class"`
+	Limits                        PublicModelLimits            `json:"limits"`
+	Availability                  PublicModelAvailability      `json:"availability"`
+	TypicalOutputTokensPerSecond  *float64                     `json:"typical_output_tokens_per_second"`
+	ExpectedOutputTokensPerSecond *float64                     `json:"expected_output_tokens_per_second"`
+	Regions                       []string                     `json:"regions"`
+	Version                       string                       `json:"version"`
+}
+
+// PublicModelMarketComparison carries the operator-recorded typical hosted
+// price for the same model class. It is only ever present when a catalog
+// manifest supplies both numbers and a source note.
+type PublicModelMarketComparison struct {
+	TypicalInputPerMillionMicrodollars  int64  `json:"typical_input_per_million_microdollars"`
+	TypicalOutputPerMillionMicrodollars int64  `json:"typical_output_per_million_microdollars"`
+	SourceNote                          string `json:"source_note"`
 }
 
 type PublicModelPrice struct {
@@ -332,11 +369,26 @@ type Fleet struct {
 }
 
 type WaitlistSignup struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
-	UseCase   string    `json:"use_case,omitempty"`
-	Source    string    `json:"source"`
-	CreatedAt time.Time `json:"created_at"`
+	ID             string    `json:"id"`
+	Email          string    `json:"email"`
+	Name           string    `json:"name,omitempty"`
+	UseCase        string    `json:"use_case,omitempty"`
+	ExpectedVolume string    `json:"expected_volume,omitempty"`
+	DataAck        bool      `json:"data_ack"`
+	ModelID        string    `json:"model_id,omitempty"`
+	Source         string    `json:"source"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// WaitlistApplication is one manually reviewed request for developer access.
+type WaitlistApplication struct {
+	Email          string
+	Name           string
+	UseCase        string
+	ExpectedVolume string
+	DataAck        bool
+	ModelID        string
+	Source         string
 }
 
 type ScheduleDefaults struct {
@@ -956,9 +1008,13 @@ WHERE jr.accepted
 
 func (s Store) publicModels(ctx context.Context, now time.Time) ([]PublicModelStatus, error) {
 	rows, err := s.Pool.Query(ctx, `
-SELECT m.id, m.display_name, COALESCE(m.description, ''), m.data_class, mv.version,
+SELECT m.id, m.display_name, COALESCE(m.description, ''), m.listing_status, m.data_class, mv.version,
        COALESCE(mp.customer_input_per_million_microdollars, 0),
        COALESCE(mp.customer_output_per_million_microdollars, 0),
+       m.market_typical_input_per_million_microdollars,
+       m.market_typical_output_per_million_microdollars,
+       COALESCE(m.market_comparison_source_note, ''),
+       m.expected_output_tokens_per_second::float8,
        COALESCE(ml.max_input_tokens, 4096),
        COALESCE(ml.max_output_tokens, 1024),
        COALESCE(ml.capabilities, '{}'::jsonb)
@@ -970,8 +1026,8 @@ LEFT JOIN LATERAL (
   SELECT * FROM model_prices WHERE model_version_id = mv.id ORDER BY effective_from DESC LIMIT 1
 ) mp ON true
 LEFT JOIN model_manifest_limits ml ON ml.model_id = m.id
-WHERE m.status IN ('alpha', 'active')
-ORDER BY m.id
+WHERE m.status IN ('alpha', 'active') AND m.listing_status <> 'hidden'
+ORDER BY (m.listing_status = 'waitlist'), m.id
 `)
 	if err != nil {
 		return nil, fmt.Errorf("query public models: %w", err)
@@ -981,9 +1037,13 @@ ORDER BY m.id
 	for rows.Next() {
 		var model PublicModelStatus
 		var capabilitiesRaw []byte
+		var marketInput, marketOutput *int64
+		var marketSourceNote string
+		var expectedSpeed *float64
 		if err := rows.Scan(
-			&model.ModelID, &model.DisplayName, &model.Description, &model.DataClass, &model.Version,
+			&model.ModelID, &model.DisplayName, &model.Description, &model.ListingStatus, &model.DataClass, &model.Version,
 			&model.Price.InputPerMillionMicrodollars, &model.Price.OutputPerMillionMicrodollars,
+			&marketInput, &marketOutput, &marketSourceNote, &expectedSpeed,
 			&model.Limits.ContextTokens, &model.Limits.MaxOutputTokens, &capabilitiesRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan public model: %w", err)
@@ -991,10 +1051,28 @@ ORDER BY m.id
 		if model.Description == "" {
 			model.Description = model.DisplayName
 		}
+		if marketInput != nil && marketOutput != nil {
+			model.MarketComparison = &PublicModelMarketComparison{
+				TypicalInputPerMillionMicrodollars:  *marketInput,
+				TypicalOutputPerMillionMicrodollars: *marketOutput,
+				SourceNote:                          marketSourceNote,
+			}
+		}
 		model.Capabilities = publicCapabilities(capabilitiesRaw)
 		capacity, err := s.publicModelCapacity(ctx, model.ModelID, now.Add(-s.staleAfter()))
 		if err != nil {
 			return nil, err
+		}
+		if model.ListingStatus == ListingWaitlist && !capacity.hasSupply() {
+			// No node is online with this model, so there is nothing honest
+			// to say about nodes, regions, or observed speed. The manifest's
+			// expected speed is the only claim, and the public page labels it
+			// as expected.
+			model.Availability = PublicModelAvailability{State: AvailabilityWaitlist}
+			model.Regions = []string{}
+			model.ExpectedOutputTokensPerSecond = expectedSpeed
+			out = append(out, model)
+			continue
 		}
 		model.Availability = PublicModelAvailability{AvailableNodes: capacity.availableNodes, State: capacity.state()}
 		model.Regions = capacity.regions
@@ -1017,14 +1095,20 @@ type publicModelCapacity struct {
 	regions        []string
 }
 
+// hasSupply reports whether any node is currently online with this model, in
+// any state. It gates the waitlist presentation: real supply always wins.
+func (c publicModelCapacity) hasSupply() bool {
+	return c.availableNodes > 0 || c.freshNodes > 0
+}
+
 func (c publicModelCapacity) state() string {
 	if c.availableNodes > 0 {
-		return "available"
+		return AvailabilityAvailable
 	}
 	if c.freshNodes > 0 {
-		return "limited"
+		return AvailabilityLimited
 	}
-	return "offline"
+	return AvailabilityOffline
 }
 
 func (s Store) publicModelCapacity(ctx context.Context, modelID string, freshnessCutoff time.Time) (publicModelCapacity, error) {
@@ -1376,16 +1460,32 @@ func (s Store) WaitlistEmailExists(ctx context.Context, email string) (bool, err
 	return exists, nil
 }
 
-func (s Store) CreateWaitlistSignup(ctx context.Context, email, useCase, source string, now time.Time) (WaitlistSignup, bool, error) {
-	email = NormalizeEmail(email)
+// ValidateExpectedVolume accepts an empty band or one of the published
+// monthly output volume options.
+func ValidateExpectedVolume(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" || expectedVolumeBands[value] {
+		return nil
+	}
+	return fmt.Errorf("expected_volume must be one of lt_1m, 1m_10m, 10m_100m, gt_100m")
+}
+
+func (s Store) CreateWaitlistSignup(ctx context.Context, application WaitlistApplication, now time.Time) (WaitlistSignup, bool, error) {
+	email := NormalizeEmail(application.Email)
 	if email == "" {
 		return WaitlistSignup{}, false, fmt.Errorf("email is required")
+	}
+	if err := ValidateExpectedVolume(application.ExpectedVolume); err != nil {
+		return WaitlistSignup{}, false, err
 	}
 	if now.IsZero() {
 		now = s.now()
 	}
-	useCase = strings.TrimSpace(useCase)
-	source = strings.TrimSpace(source)
+	name := strings.TrimSpace(application.Name)
+	useCase := strings.TrimSpace(application.UseCase)
+	expectedVolume := strings.TrimSpace(application.ExpectedVolume)
+	modelID := strings.TrimSpace(application.ModelID)
+	source := strings.TrimSpace(application.Source)
 	if source == "" {
 		source = "public_catalog"
 	}
@@ -1395,11 +1495,13 @@ func (s Store) CreateWaitlistSignup(ctx context.Context, email, useCase, source 
 	}
 	var signup WaitlistSignup
 	err = s.Pool.QueryRow(ctx, `
-INSERT INTO waitlist_signups (id, email, use_case, source, created_at)
-VALUES ($1, $2, NULLIF($3, ''), $4, $5)
+INSERT INTO waitlist_signups (id, email, name, use_case, expected_volume, data_ack, model_id, source, created_at)
+VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), $8, $9)
 ON CONFLICT (email) DO NOTHING
-RETURNING id, email, COALESCE(use_case, ''), source, created_at
-`, signupID, email, useCase, source, now).Scan(&signup.ID, &signup.Email, &signup.UseCase, &signup.Source, &signup.CreatedAt)
+RETURNING id, email, COALESCE(name, ''), COALESCE(use_case, ''), COALESCE(expected_volume, ''), data_ack, COALESCE(model_id, ''), source, created_at
+`, signupID, email, name, useCase, expectedVolume, application.DataAck, modelID, source, now).Scan(
+		&signup.ID, &signup.Email, &signup.Name, &signup.UseCase, &signup.ExpectedVolume,
+		&signup.DataAck, &signup.ModelID, &signup.Source, &signup.CreatedAt)
 	if err == nil {
 		return signup, true, nil
 	}
@@ -1407,10 +1509,12 @@ RETURNING id, email, COALESCE(use_case, ''), source, created_at
 		return WaitlistSignup{}, false, fmt.Errorf("create waitlist signup: %w", err)
 	}
 	err = s.Pool.QueryRow(ctx, `
-SELECT id, email, COALESCE(use_case, ''), source, created_at
+SELECT id, email, COALESCE(name, ''), COALESCE(use_case, ''), COALESCE(expected_volume, ''), data_ack, COALESCE(model_id, ''), source, created_at
 FROM waitlist_signups
 WHERE email = $1
-`, email).Scan(&signup.ID, &signup.Email, &signup.UseCase, &signup.Source, &signup.CreatedAt)
+`, email).Scan(
+		&signup.ID, &signup.Email, &signup.Name, &signup.UseCase, &signup.ExpectedVolume,
+		&signup.DataAck, &signup.ModelID, &signup.Source, &signup.CreatedAt)
 	if err != nil {
 		return WaitlistSignup{}, false, fmt.Errorf("load existing waitlist signup: %w", err)
 	}
@@ -1419,7 +1523,7 @@ WHERE email = $1
 
 func (s Store) ListWaitlist(ctx context.Context) ([]WaitlistSignup, error) {
 	rows, err := s.Pool.Query(ctx, `
-SELECT id, email, COALESCE(use_case, ''), source, created_at
+SELECT id, email, COALESCE(name, ''), COALESCE(use_case, ''), COALESCE(expected_volume, ''), data_ack, COALESCE(model_id, ''), source, created_at
 FROM waitlist_signups
 ORDER BY created_at DESC, email
 LIMIT $1
@@ -1431,7 +1535,10 @@ LIMIT $1
 	var out []WaitlistSignup
 	for rows.Next() {
 		var signup WaitlistSignup
-		if err := rows.Scan(&signup.ID, &signup.Email, &signup.UseCase, &signup.Source, &signup.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&signup.ID, &signup.Email, &signup.Name, &signup.UseCase, &signup.ExpectedVolume,
+			&signup.DataAck, &signup.ModelID, &signup.Source, &signup.CreatedAt,
+		); err != nil {
 			return nil, fmt.Errorf("scan waitlist signup: %w", err)
 		}
 		out = append(out, signup)
@@ -1446,14 +1553,18 @@ func (s Store) WaitlistCSV(ctx context.Context) ([]byte, error) {
 	}
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"id", "email", "use_case", "source", "created_at"}); err != nil {
+	if err := writer.Write([]string{"id", "email", "name", "use_case", "expected_volume", "data_ack", "model_id", "source", "created_at"}); err != nil {
 		return nil, err
 	}
 	for _, signup := range signups {
 		if err := writer.Write([]string{
 			signup.ID,
 			signup.Email,
+			signup.Name,
 			signup.UseCase,
+			signup.ExpectedVolume,
+			strconv.FormatBool(signup.DataAck),
+			signup.ModelID,
 			signup.Source,
 			signup.CreatedAt.Format(time.RFC3339),
 		}); err != nil {

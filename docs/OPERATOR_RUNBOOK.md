@@ -400,12 +400,54 @@ Check the public API directly:
 curl -sS -H 'X-Geo-Region: in-south' http://127.0.0.1:8080/v1/status | jq .
 curl -sS -X POST http://127.0.0.1:8080/v1/waitlist \
   -H 'Content-Type: application/json' \
-  -d '{"email":"dev@example.com","use_case":"alpha model eval"}' | jq .
+  -d '{"email":"dev@example.com","name":"Dev","use_case":"alpha model eval","expected_volume":"1m_10m","data_ack":true,"model_id":"qwen2.5-7b-instruct"}' | jq .
 ```
 
-Read and export the waitlist:
+`use_case` and `data_ack: true` are required; `expected_volume` must be empty or one of `lt_1m`, `1m_10m`, `10m_100m`, `gt_100m`.
+
+## Reviewing Access Applications
+
+Every application is reviewed by hand. Nothing is emailed automatically, so the
+review loop is: read the queue, decide, then issue a key out of band.
+
+Read and export the queue:
 
 ```sh
 go run ./cmd/admin-cli waitlist list --coordinator http://127.0.0.1:8080 --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
-go run ./cmd/admin-cli waitlist export --out waitlist.csv --coordinator http://127.0.0.1:8080 --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
+go run ./cmd/admin-cli waitlist export --out applications.csv --coordinator http://127.0.0.1:8080 --operator-token "$THIRDSHIFT_OPERATOR_TOKEN"
 ```
+
+`waitlist list` prints email, name, requested model, expected monthly output
+volume, the data-class acknowledgment, source, timestamp, and the use case.
+`waitlist export` writes the same columns as CSV for offline review.
+
+What to check per row, in order:
+
+1. `data_ack` is `true`. It always is for applications submitted through the
+   public form; a `false` value means the row predates the acknowledgment
+   column and the applicant must reapply before any key is issued.
+2. The use case is compatible with the data-class policy. Anything that reads
+   like regulated, personal, or confidential data is a decline: community nodes
+   cannot guarantee host-blind confidentiality.
+3. The requested model is listed and supply exists or is planned. A waitlist
+   model has no nodes yet, so approving it means committing to bring supply
+   online before the key is useful.
+4. The volume band is plausible against current supply. `gt_100m` against a
+   handful of nodes is a conversation, not an approval.
+
+Approve by creating the organization and key, then reply to the applicant by
+hand:
+
+```sh
+go run ./cmd/admin-cli org create --name "Applicant Org" --coordinator "$THIRDSHIFT_COORDINATOR_URL"
+go run ./cmd/admin-cli apikey create --org "$ORG_ID" --model qwen2.5-7b-instruct --coordinator "$THIRDSHIFT_COORDINATOR_URL"
+```
+
+The key secret is shown once at creation. Model permissions are explicit per
+key, so only grant the models the application actually asked for.
+
+Turning a waitlist model into a live one is a supply decision, not a code
+change: bring nodes online with the model and the public page moves from
+"Available on request" to a live availability state by itself. To stop offering
+a model publicly, set its manifest `listing.status` to `hidden` and re-run
+`catalog sync`; the model stays routable for existing keys.

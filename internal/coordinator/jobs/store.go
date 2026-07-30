@@ -182,16 +182,37 @@ func (s PGStore) upsertManifest(ctx context.Context, manifest models.Manifest, m
 	if dataClass == "" {
 		dataClass = "public_or_non_sensitive"
 	}
+	var marketInput, marketOutput *int64
+	var marketSourceNote string
+	if comparison := manifest.Listing.MarketComparison; comparison != nil {
+		input := usdToMicrodollars(comparison.TypicalInputPerMillionUSD)
+		output := usdToMicrodollars(comparison.TypicalOutputPerMillionUSD)
+		marketInput = &input
+		marketOutput = &output
+		marketSourceNote = comparison.SourceNote
+	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO models (id, display_name, description, status, data_class, created_at, updated_at)
-VALUES ($1, $2, NULLIF($3, ''), $4, $5, now(), now())
+INSERT INTO models (id, display_name, description, status, data_class, listing_status,
+                    expected_output_tokens_per_second,
+                    market_typical_input_per_million_microdollars,
+                    market_typical_output_per_million_microdollars,
+                    market_comparison_source_note,
+                    created_at, updated_at)
+VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, $9, NULLIF($10, ''), now(), now())
 ON CONFLICT (id) DO UPDATE
 SET display_name = EXCLUDED.display_name,
     description = EXCLUDED.description,
     status = EXCLUDED.status,
     data_class = EXCLUDED.data_class,
+    listing_status = EXCLUDED.listing_status,
+    expected_output_tokens_per_second = EXCLUDED.expected_output_tokens_per_second,
+    market_typical_input_per_million_microdollars = EXCLUDED.market_typical_input_per_million_microdollars,
+    market_typical_output_per_million_microdollars = EXCLUDED.market_typical_output_per_million_microdollars,
+    market_comparison_source_note = EXCLUDED.market_comparison_source_note,
     updated_at = now()
-`, manifest.ModelID, manifest.DisplayName, manifest.Description, manifest.Status, dataClass); err != nil {
+`, manifest.ModelID, manifest.DisplayName, manifest.CatalogDescription(), manifest.Status, dataClass,
+		manifest.ListingStatus(), manifest.Listing.ExpectedOutputTokensPerSecond,
+		marketInput, marketOutput, marketSourceNote); err != nil {
 		return fmt.Errorf("upsert model: %w", err)
 	}
 

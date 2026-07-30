@@ -109,7 +109,7 @@ func TestM4PauseResumeDrainAndThermalGuard(t *testing.T) {
 		body, status := postDeveloperRaw(t, env.server, env.apiKey, "/v1/chat/completions", []byte(`{"model":"thirdshift-tiny-chat-v1","messages":[{"role":"user","content":"drain hold"}],"max_tokens":8,"stream":false}`), "")
 		holdDone <- completionHTTPResult{body: body, status: status}
 	}()
-	waitForSignal(t, runtime.holdStarted, "drain hold runtime request")
+	waitForHoldSignal(t, runtime.holdStarted, holdDone, "drain hold completion")
 	if _, err := control.Send(env.ctx, node.dataDir, control.Command{Action: "pause"}); err != nil {
 		t.Fatalf("pause during job: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestM4ThermalHardLimitTerminatesRunningAttempt(t *testing.T) {
 		body, status := postDeveloperRaw(t, env.server, env.apiKey, "/v1/chat/completions", []byte(`{"model":"thirdshift-tiny-chat-v1","messages":[{"role":"user","content":"thermal hard"}],"max_tokens":8,"stream":false}`), "")
 		done <- completionHTTPResult{body: body, status: status}
 	}()
-	waitForSignal(t, runtime.holdStarted, "thermal hard runtime request")
+	waitForHoldSignal(t, runtime.holdStarted, done, "thermal hard completion")
 	telemetry.setTemp(90)
 	result := waitForHTTPResult(t, done, "thermal hard completion")
 	if result.status != http.StatusBadGateway {
@@ -209,7 +209,7 @@ func TestM4TransientFailureRetriesSecondNodeAndPermanentInvalidRequestDoesNotRet
 		body, status := postDeveloperRaw(t, env.server, env.apiKey, "/v1/chat/completions", []byte(`{"model":"thirdshift-tiny-chat-v1","messages":[{"role":"user","content":"retry after disconnect"}],"max_tokens":8,"stream":false}`), "m4-retry")
 		done <- completionHTTPResult{body: body, status: status}
 	}()
-	waitForSignal(t, firstRuntime.holdStarted, "first runtime hold")
+	waitForHoldSignal(t, firstRuntime.holdStarted, done, "retry completion first hold")
 	firstNode.stop(t)
 	firstRuntime.releaseHold()
 	result := waitForHTTPResult(t, done, "retry completion")
@@ -308,7 +308,12 @@ func newM4Env(t *testing.T, logOutput io.Writer) *m4Env {
 		Scheduler:   jobs.Scheduler{Weights: jobs.DefaultSchedulerWeights()},
 		RateLimiter: &jobs.RateLimiter{LimitPerMinute: 1000},
 		StaleAfter:  2 * time.Second,
-		LeaseTTL:    250 * time.Millisecond,
+		// A node has to receive the offer over its WebSocket, accept it, and
+		// call its runtime before the lease expires. 250ms is inside that
+		// round trip once several test packages compete for the machine, and
+		// an expired lease fails the request outright rather than merely
+		// delaying it.
+		LeaseTTL:    5 * time.Second,
 		SyncTimeout: 5 * time.Second,
 		Logger:      logger,
 	}
@@ -577,6 +582,21 @@ func waitForSecurityEvent(t *testing.T, env *m4Env, eventType string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for security event %s", eventType)
+}
+
+// waitForHoldSignal waits for the fake runtime to receive the held request. It
+// fails with the real HTTP result if the completion finishes first: a request
+// that never reaches the runtime has already failed, and reporting that status
+// beats reporting a timeout that hides the cause.
+func waitForHoldSignal(t *testing.T, started <-chan struct{}, done <-chan completionHTTPResult, name string) {
+	t.Helper()
+	select {
+	case <-started:
+	case result := <-done:
+		t.Fatalf("%s finished without reaching the runtime: status=%d body=%s", name, result.status, string(result.body))
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", name)
+	}
 }
 
 func waitForSignal(t *testing.T, ch <-chan struct{}, name string) {

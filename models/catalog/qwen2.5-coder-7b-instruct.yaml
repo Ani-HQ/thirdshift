@@ -1,0 +1,65 @@
+schema_version: 1
+model_id: qwen2.5-coder-7b-instruct
+display_name: Qwen2.5 Coder 7B Instruct
+status: alpha
+listing:
+  status: waitlist
+  description: Code generation, refactors, and explanations for everyday programming work.
+  expected_output_tokens_per_second: 30
+  market_comparison:
+    typical_input_per_million_usd: 0.04
+    typical_output_per_million_usd: 0.10
+    source_note: typical hosted price, July 2026
+source:
+  provider: huggingface
+  repository: bartowski/Qwen2.5-Coder-7B-Instruct-GGUF
+  revision: 1f629da0c8bed16b9e50cee91c70693650e66c35
+  file: Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf
+  url: https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/1f629da0c8bed16b9e50cee91c70693650e66c35/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf
+  sha256: 1664fccab734674a50763490a8c6931b70e3f2f8ec10031b54806d30e5f956b6
+  size_bytes: 4683074336
+license:
+  identifier: apache-2.0
+  reviewed_at: 2026-07-30
+  notes: Apache-2.0 reported by the pinned Hugging Face model card metadata; sha256 and size read from the Git LFS pointer at the pinned revision and cross-checked against the resolve endpoint x-linked-etag and x-linked-size headers.
+runtime:
+  engine: llama.cpp
+  build_id: llama-cpp-b10180
+  release_manifest: llama-cpp-b10180.runtime.json
+  binary_sha256: 789f717355fb2574becfaa70601714c78908bd1e5d6c6cadd6b8ccc98060d0f7
+  arguments:
+    context_size: 8192
+    batch_size: 512
+    gpu_layers: auto
+    parallel: 1
+    host: 127.0.0.1
+    port: dynamic
+hardware:
+  min_vram_mb: 8192
+  min_ram_mb: 16384
+  min_disk_mb: 12000
+  eligible_gpu_classes:
+    - ts-nvidia-8gb-v1
+    - ts-nvidia-12gb-v1
+limits:
+  max_input_tokens: 7168
+  max_output_tokens: 1024
+  max_request_bytes: 262144
+capabilities:
+  chat_completions: true
+  streaming: false
+  tools: false
+  embeddings: false
+policy:
+  data_class: public_or_non_sensitive
+  content_filter_profile: alpha-default
+pricing:
+  customer_input_per_million_usd: 0.03
+  customer_output_per_million_usd: 0.08
+  host_credit_per_million_accepted_output_usd: 0.04
+verification:
+  duplicate_sample_rate: 0.02
+  challenge_rate: 0.01
+signature:
+  key_id: catalog-key-2026-01
+  value: TODO-CATALOG-SIGNATURE

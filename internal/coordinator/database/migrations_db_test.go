@@ -28,6 +28,67 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestModelListingStatusDefaultsToLiveAndIsConstrained(t *testing.T) {
+	ctx := context.Background()
+	conn, schema := migratedTestSchema(t, ctx)
+	defer conn.Close(ctx)
+	defer dropSchema(t, ctx, conn, schema)
+
+	if _, err := conn.Exec(ctx, `
+INSERT INTO models (id, display_name) VALUES ('listing-default', 'Listing Default');
+INSERT INTO models (id, display_name, listing_status, expected_output_tokens_per_second,
+                    market_typical_input_per_million_microdollars,
+                    market_typical_output_per_million_microdollars,
+                    market_comparison_source_note)
+VALUES ('listing-waitlist', 'Listing Waitlist', 'waitlist', 30, 40000, 100000, 'typical hosted price, July 2026');
+INSERT INTO models (id, display_name, listing_status) VALUES ('listing-hidden', 'Listing Hidden', 'hidden');
+`); err != nil {
+		t.Fatalf("insert listing rows: %v", err)
+	}
+	var defaultStatus string
+	if err := conn.QueryRow(ctx, "SELECT listing_status FROM models WHERE id = 'listing-default'").Scan(&defaultStatus); err != nil {
+		t.Fatalf("read default listing status: %v", err)
+	}
+	if defaultStatus != "live" {
+		t.Fatalf("default listing_status = %q, want live", defaultStatus)
+	}
+	if _, err := conn.Exec(ctx, "INSERT INTO models (id, display_name, listing_status) VALUES ('listing-bad', 'Bad', 'coming_soon')"); err == nil {
+		t.Fatal("unknown listing_status accepted")
+	}
+	if _, err := conn.Exec(ctx, `
+INSERT INTO models (id, display_name, market_typical_input_per_million_microdollars)
+VALUES ('listing-half-comparison', 'Half Comparison', 40000)`); err == nil {
+		t.Fatal("half-populated market comparison accepted")
+	}
+}
+
+func TestWaitlistApplicationColumnsAreConstrained(t *testing.T) {
+	ctx := context.Background()
+	conn, schema := migratedTestSchema(t, ctx)
+	defer conn.Close(ctx)
+	defer dropSchema(t, ctx, conn, schema)
+
+	if _, err := conn.Exec(ctx, `
+INSERT INTO waitlist_signups (id, email, name, use_case, expected_volume, data_ack, model_id)
+VALUES ('wait_01J0M000000000000000000000', 'dev@example.com', 'Dev', 'Batch summaries', '10m_100m', true, 'qwen2.5-7b-instruct');
+INSERT INTO waitlist_signups (id, email) VALUES ('wait_01J0M000000000000000000001', 'legacy@example.com');
+`); err != nil {
+		t.Fatalf("insert applications: %v", err)
+	}
+	var legacyAck bool
+	if err := conn.QueryRow(ctx, "SELECT data_ack FROM waitlist_signups WHERE email = 'legacy@example.com'").Scan(&legacyAck); err != nil {
+		t.Fatalf("read legacy data_ack: %v", err)
+	}
+	if legacyAck {
+		t.Fatal("rows predating the acknowledgment must default to false")
+	}
+	if _, err := conn.Exec(ctx, `
+INSERT INTO waitlist_signups (id, email, expected_volume)
+VALUES ('wait_01J0M000000000000000000002', 'bad@example.com', 'loads')`); err == nil {
+		t.Fatal("unknown expected_volume band accepted")
+	}
+}
+
 func TestLedgerPostedTransactionsMustBalance(t *testing.T) {
 	ctx := context.Background()
 	conn, schema := migratedTestSchema(t, ctx)

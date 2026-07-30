@@ -36,7 +36,12 @@ func TestRoutedDeveloperRequestEndToEnd(t *testing.T) {
 		Scheduler:   jobs.Scheduler{Weights: jobs.DefaultSchedulerWeights()},
 		RateLimiter: &jobs.RateLimiter{LimitPerMinute: 1000},
 		StaleAfter:  2 * time.Second,
-		LeaseTTL:    250 * time.Millisecond,
+		// A node has to receive the offer over its WebSocket, accept it, and
+		// call its runtime before the lease expires. 250ms is inside that
+		// round trip once several test packages compete for the machine, and
+		// an expired lease fails the request outright rather than merely
+		// delaying it.
+		LeaseTTL:    5 * time.Second,
 		SyncTimeout: 5 * time.Second,
 	}
 	validator, err := protocol.NewValidator(filepath.Join("..", "..", "packages", "protocol", "schemas"))
