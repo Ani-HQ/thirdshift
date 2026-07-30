@@ -37,7 +37,7 @@
 
 - [ ] Generate real release signing key and replace placeholder public key.
 - [ ] Publish first draft release after CI completes.
-- [ ] Run `scripts/verify-windows.ps1` on a real Windows host.
+- [ ] Run `scripts/verify-windows.ps1` on a real Windows host. See docs/WINDOWS_VERIFICATION.md (TEMPORARY file — delete it, and this pointer, in the PR that records the results, before publishing the draft release).
 - [ ] Record demo video from [docs/DEMO.md](DEMO.md).
 - [ ] Flip repository visibility. Human task.
 - [ ] Configure public domain and Caddy/TLS. Human task.
