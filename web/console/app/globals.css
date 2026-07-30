@@ -500,6 +500,17 @@ body:has(.public-page) {
   overflow-wrap: anywhere;
 }
 
+.model-identity .model-attribution {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--pub-secondary);
+}
+
+.model-identity .model-attribution a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .model-price .price-primary {
   font-size: 15px;
   font-variant-numeric: tabular-nums;

@@ -85,6 +85,15 @@ func (p *LocalRuntimeProvider) Prepare(ctx context.Context, modelID string) (Run
 	if err != nil {
 		return RuntimeStatus{}, err
 	}
+	if manifest.License.DistributeWithModel {
+		text, ok := models.LicenseTextFor(manifest.License.Identifier)
+		if !ok {
+			return RuntimeStatus{}, fmt.Errorf("model %s requires license distribution but no vendored text for %q", manifest.ModelID, manifest.License.Identifier)
+		}
+		if _, err := cache.EnsureLicense(manifest.Source.SHA256, text); err != nil {
+			return RuntimeStatus{}, err
+		}
+	}
 	port, err := parsePort(manifest.Runtime.Arguments.Port)
 	if err != nil {
 		return RuntimeStatus{}, err

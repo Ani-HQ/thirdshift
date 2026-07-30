@@ -270,6 +270,31 @@ function ModelRow({
           {model.model_id} · {model.limits.context_tokens.toLocaleString()} context ·{" "}
           {model.limits.max_output_tokens.toLocaleString()} max output
         </p>
+        {model.attribution ? (
+          <p className="model-attribution">
+            {model.attribution.display_text}
+            {model.attribution.notice_text ? (
+              <>
+                {" · "}
+                {model.attribution.license_url ? (
+                  <a href={model.attribution.license_url} target="_blank" rel="noreferrer">
+                    {model.attribution.notice_text}
+                  </a>
+                ) : (
+                  model.attribution.notice_text
+                )}
+              </>
+            ) : null}
+            {model.attribution.aup_url ? (
+              <>
+                {" · "}
+                <a href={model.attribution.aup_url} target="_blank" rel="noreferrer">
+                  Acceptable Use Policy
+                </a>
+              </>
+            ) : null}
+          </p>
+        ) : null}
       </div>
       <div className="model-price">
         <p className="price-primary">

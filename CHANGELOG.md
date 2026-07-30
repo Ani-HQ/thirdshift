@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Llama 3.2 Community License signed off (2026-07-30) with manifest-driven compliance: "Built with Llama" attribution, license notice, and AUP link on the public catalog; the vendored license agreement is written next to the cached model on every host via `license.distribute_with_model`; model preparation fails if required license distribution is impossible (migration `000011`).
+
 - Added public model catalog data to `/v1/status`: model cards, public prices, limits, aggregate availability state, regions, requester-region hint, and 24-hour median output speed.
 - Added fleet/node aggregate region fields and operator commands for region assignment without exposing host or per-node details publicly.
 - Added unauthenticated developer waitlist signup plus operator waitlist list/export commands.

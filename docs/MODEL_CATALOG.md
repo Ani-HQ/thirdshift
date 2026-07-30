@@ -53,3 +53,7 @@ curl -sSIL "https://huggingface.co/<repo>/resolve/<commit>/<file>" | grep -iE 'x
 The `x-linked-etag` and `x-linked-size` headers on the resolve redirect give an
 independent confirmation of the same hash and byte size. Record both the values
 and the method in the manifest `license.notes` and in `docs/DECISIONS.md`.
+
+## License attribution and distribution
+
+Manifests may declare a `license.attribution` block (`display_text`, `notice_text`, `license_url`, `aup_url`); the public catalog renders it on the model's row. `license.distribute_with_model: true` makes every host node write the vendored license agreement next to the cached model file as `<sha256>.LICENSE.txt` — required for the Llama 3.2 Community License, whose upstream file is gated. Vendored texts live in `internal/node/models/licenses/`; adding a distributable license means vendoring its text and mapping the identifier there. Usage of Llama models must also comply with the Meta Llama 3.2 Acceptable Use Policy (https://www.llama.com/llama3_2/use-policy) in addition to Thirdshift's data-class policy.

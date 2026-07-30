@@ -82,9 +82,20 @@ type Source struct {
 }
 
 type License struct {
-	Identifier string
-	ReviewedAt string
-	Notes      string
+	Identifier          string
+	ReviewedAt          string
+	Notes               string
+	DistributeWithModel bool
+	Attribution         *LicenseAttribution
+}
+
+// LicenseAttribution carries operator-facing attribution requirements a model
+// license imposes on public surfaces (e.g. "Built with Llama").
+type LicenseAttribution struct {
+	DisplayText string
+	NoticeText  string
+	LicenseURL  string
+	AUPURL      string
 }
 
 type Runtime struct {
@@ -238,6 +249,14 @@ func parseManifest(s scanner) (Manifest, error) {
 			return Manifest{}, fmt.Errorf("model manifest %s listing.market_comparison needs positive typical prices", manifest.ModelID)
 		}
 	}
+	if manifest.License.DistributeWithModel {
+		if _, ok := LicenseTextFor(manifest.License.Identifier); !ok {
+			return Manifest{}, fmt.Errorf("model manifest %s requires license distribution but no vendored license text exists for identifier %q", manifest.ModelID, manifest.License.Identifier)
+		}
+	}
+	if attribution := manifest.License.Attribution; attribution != nil && attribution.DisplayText == "" {
+		return Manifest{}, fmt.Errorf("model manifest %s license.attribution needs display_text", manifest.ModelID)
+	}
 	return manifest, nil
 }
 
@@ -305,6 +324,12 @@ func assignSection(manifest *Manifest, section, key, value string) error {
 			manifest.License.ReviewedAt = value
 		case "notes":
 			manifest.License.Notes = value
+		case "distribute_with_model":
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("license.distribute_with_model must be a boolean: %w", err)
+			}
+			manifest.License.DistributeWithModel = parsed
 		}
 	case "runtime":
 		switch key {
@@ -396,6 +421,25 @@ func assignSection(manifest *Manifest, section, key, value string) error {
 func assignSubsection(manifest *Manifest, section, subsection, key, value string) error {
 	if section == "listing" && subsection == "market_comparison" {
 		return assignMarketComparison(manifest, key, value)
+	}
+	if section == "license" && subsection == "attribution" {
+		if manifest.License.Attribution == nil {
+			manifest.License.Attribution = &LicenseAttribution{}
+		}
+		attribution := manifest.License.Attribution
+		switch key {
+		case "display_text":
+			attribution.DisplayText = value
+		case "notice_text":
+			attribution.NoticeText = value
+		case "license_url":
+			attribution.LicenseURL = value
+		case "aup_url":
+			attribution.AUPURL = value
+		default:
+			return fmt.Errorf("unknown license.attribution key %q", key)
+		}
+		return nil
 	}
 	if section != "runtime" || subsection != "arguments" {
 		return nil

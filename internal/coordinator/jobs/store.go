@@ -191,14 +191,24 @@ func (s PGStore) upsertManifest(ctx context.Context, manifest models.Manifest, m
 		marketOutput = &output
 		marketSourceNote = comparison.SourceNote
 	}
+	var attributionDisplay, attributionNotice, attributionLicenseURL, attributionAUPURL string
+	if attribution := manifest.License.Attribution; attribution != nil {
+		attributionDisplay = attribution.DisplayText
+		attributionNotice = attribution.NoticeText
+		attributionLicenseURL = attribution.LicenseURL
+		attributionAUPURL = attribution.AUPURL
+	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO models (id, display_name, description, status, data_class, listing_status,
                     expected_output_tokens_per_second,
                     market_typical_input_per_million_microdollars,
                     market_typical_output_per_million_microdollars,
                     market_comparison_source_note,
+                    attribution_display_text, attribution_notice_text,
+                    attribution_license_url, attribution_aup_url,
                     created_at, updated_at)
-VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, $9, NULLIF($10, ''), now(), now())
+VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, $9, NULLIF($10, ''),
+        NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''), NULLIF($14, ''), now(), now())
 ON CONFLICT (id) DO UPDATE
 SET display_name = EXCLUDED.display_name,
     description = EXCLUDED.description,
@@ -209,10 +219,15 @@ SET display_name = EXCLUDED.display_name,
     market_typical_input_per_million_microdollars = EXCLUDED.market_typical_input_per_million_microdollars,
     market_typical_output_per_million_microdollars = EXCLUDED.market_typical_output_per_million_microdollars,
     market_comparison_source_note = EXCLUDED.market_comparison_source_note,
+    attribution_display_text = EXCLUDED.attribution_display_text,
+    attribution_notice_text = EXCLUDED.attribution_notice_text,
+    attribution_license_url = EXCLUDED.attribution_license_url,
+    attribution_aup_url = EXCLUDED.attribution_aup_url,
     updated_at = now()
 `, manifest.ModelID, manifest.DisplayName, manifest.CatalogDescription(), manifest.Status, dataClass,
 		manifest.ListingStatus(), manifest.Listing.ExpectedOutputTokensPerSecond,
-		marketInput, marketOutput, marketSourceNote); err != nil {
+		marketInput, marketOutput, marketSourceNote,
+		attributionDisplay, attributionNotice, attributionLicenseURL, attributionAUPURL); err != nil {
 		return fmt.Errorf("upsert model: %w", err)
 	}
 

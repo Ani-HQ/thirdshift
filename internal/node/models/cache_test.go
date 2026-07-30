@@ -101,3 +101,28 @@ func writeCachedModel(t *testing.T, dir, label string, body []byte) string {
 	}
 	return hash
 }
+
+func TestEnsureLicenseWritesTextNextToModel(t *testing.T) {
+	dir := t.TempDir()
+	cache := Cache{Dir: dir}
+	path, err := cache.EnsureLicense("sha256:feedface", "LICENSE BODY")
+	if err != nil {
+		t.Fatalf("ensure license: %v", err)
+	}
+	if filepath.Base(path) != "feedface.LICENSE.txt" {
+		t.Fatalf("license path = %q", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "LICENSE BODY" {
+		t.Fatalf("license content = %q err=%v", data, err)
+	}
+	if _, err := cache.EnsureLicense("feedface", "LICENSE BODY"); err != nil {
+		t.Fatalf("idempotent ensure failed: %v", err)
+	}
+	if _, err := cache.EnsureLicense("", "text"); err == nil {
+		t.Fatal("empty sha accepted")
+	}
+	if _, err := cache.EnsureLicense("feedface", ""); err == nil {
+		t.Fatal("empty license text accepted")
+	}
+}

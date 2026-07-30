@@ -96,6 +96,39 @@ describe("console components", () => {
     expect(container.querySelectorAll(".dot")).toHaveLength(1);
   });
 
+  it("renders license attribution only for models that declare it", () => {
+    const status = publicStatusFixture({
+      models: [
+        waitlistModelFixture({
+          model_id: "llama-3.2-3b-instruct",
+          display_name: "Llama 3.2 3B Instruct",
+          attribution: {
+            display_text: "Built with Llama",
+            notice_text: "Llama 3.2 is licensed under the Llama 3.2 Community License",
+            license_url: "https://example.invalid/license",
+            aup_url: "https://example.invalid/aup"
+          }
+        }),
+        waitlistModelFixture()
+      ]
+    });
+    stubStatusFetch(status);
+    const { container } = render(<PublicStatusPage initialStatus={status} />);
+    const rows = container.querySelectorAll(".model-row");
+    expect(rows).toHaveLength(2);
+    const llamaRow = within(rows[0] as HTMLElement);
+    expect(llamaRow.getByText(/Built with Llama/)).toBeInTheDocument();
+    const notice = llamaRow.getByText("Llama 3.2 is licensed under the Llama 3.2 Community License");
+    expect(notice.closest("a")).toHaveAttribute("href", "https://example.invalid/license");
+    expect(llamaRow.getByText("Acceptable Use Policy").closest("a")).toHaveAttribute(
+      "href",
+      "https://example.invalid/aup"
+    );
+    const qwenRow = within(rows[1] as HTMLElement);
+    expect(qwenRow.queryByText(/Built with Llama/)).not.toBeInTheDocument();
+    expect(qwenRow.queryByText(/Acceptable Use Policy/)).not.toBeInTheDocument();
+  });
+
   it("renders the market comparison with a rounded cheaper tag", () => {
     const status = publicStatusFixture({ models: [waitlistModelFixture()] });
     stubStatusFetch(status);
