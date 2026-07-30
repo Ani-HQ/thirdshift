@@ -2,7 +2,7 @@ param(
     [string]$Repository = "https://github.com/Ani-HQ/thirdshift",
     [string]$Version = "latest",
     [string]$InstallRoot = "$env:LOCALAPPDATA\Thirdshift",
-    [string]$ReleasePublicKey = "45PVSQThoHK/EAnCaRg4Iwhz+DrlM+lx8LrapJ2NtBA="
+    [string]$ReleasePublicKey = "/Bgu4fQntQGB6q3j18Z+du1L1/yOzU2/wNmSAQWVCMo="
 )
 
 $ErrorActionPreference = "Stop"

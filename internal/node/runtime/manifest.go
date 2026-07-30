@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-const DefaultRuntimePublicKeyBase64 = "45PVSQThoHK/EAnCaRg4Iwhz+DrlM+lx8LrapJ2NtBA="
+const DefaultRuntimePublicKeyBase64 = "/Bgu4fQntQGB6q3j18Z+du1L1/yOzU2/wNmSAQWVCMo="
 
 type ReleaseManifest struct {
 	SchemaVersion int                        `json:"schema_version"`
