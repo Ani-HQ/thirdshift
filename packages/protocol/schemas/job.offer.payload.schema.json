@@ -31,7 +31,7 @@
     },
     "model_id": {
       "type": "string",
-      "pattern": "^thirdshift-[a-z0-9-]+-v[0-9]+$"
+      "pattern": "^[a-z0-9][a-z0-9.-]{1,120}$"
     },
     "request": {
       "type": "object",

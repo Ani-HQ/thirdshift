@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed the job.offer schema rejecting real catalog model ids: the Milestone 0 pattern only allowed `thirdshift-*-vN` names, so offers for `qwen2.5-7b-instruct` failed the coordinator's own outbound validation. Also logs the previously swallowed scheduling error.
+
 - Fixed scheduler eligibility and result verification comparing node runtime hashes against a single expected binary hash: runtime releases now record per-platform artifact hashes (migration `000012`), so Windows nodes are eligible instead of only nodes matching the manifest's one pinned binary. Found when the first Windows node sat AVAILABLE yet every request returned no_capacity.
 
 - Fixed released binaries failing at startup outside a repo checkout: protocol schemas and the model catalog (including runtime release manifests) are now embedded in the binary, with disk copies taking precedence when present. Found by the first real installer-based node start on Windows.
