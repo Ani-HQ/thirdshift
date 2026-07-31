@@ -48,6 +48,14 @@ const (
 
 // Public availability states. Only the first three describe measured supply;
 // waitlist means the model is offered for applications with no supply yet.
+// Public host states. Anything not currently serving or idle reads as offline;
+// the page never speculates about why a machine went away.
+const (
+	HostStateServing = "serving"
+	HostStateIdle    = "idle"
+	HostStateOffline = "offline"
+)
+
 const (
 	AvailabilityAvailable = "available"
 	AvailabilityLimited   = "limited"
@@ -284,6 +292,8 @@ type PublicStatus struct {
 	ModelsAvailable           []ModelAvailability `json:"models_available"`
 	Models                    []PublicModelStatus `json:"models"`
 	RegionsOnline             []string            `json:"regions_online"`
+	RegionNodeCounts          []RegionNodeCount   `json:"region_node_counts"`
+	Hosts                     []PublicHostStatus  `json:"hosts"`
 	RequesterRegion           *string             `json:"requester_region"`
 	JobsCompleted24h          int64               `json:"jobs_completed_24h"`
 	JobsCompletedTotal        int64               `json:"jobs_completed_total"`
@@ -292,6 +302,25 @@ type PublicStatus struct {
 	EstimatedGPUHoursReused   float64             `json:"estimated_gpu_hours_reused"`
 	EstimatedGPUHoursReused24 float64             `json:"estimated_gpu_hours_reused_24h"`
 	GeneratedAt               time.Time           `json:"generated_at"`
+}
+
+// PublicHostStatus is one contributing machine as the public page may see it.
+// Handbook section 2.3 is hard law here: no node id, hostname, GPU, fleet, or
+// operator name may appear on this struct, now or later.
+type PublicHostStatus struct {
+	Handle                    string `json:"handle"`
+	Region                    string `json:"region,omitempty"`
+	State                     string `json:"state"`
+	Jobs24h                   int64  `json:"jobs_24h"`
+	CreditedMicrodollars24h   int64  `json:"credited_microdollars_24h"`
+	CreditedMicrodollarsTotal int64  `json:"credited_microdollars_total"`
+}
+
+// RegionNodeCount is the aggregate the public map draws from. A count is the
+// smallest number the map can honestly show; it never carries node detail.
+type RegionNodeCount struct {
+	Region    string `json:"region"`
+	NodeCount int    `json:"node_count"`
 }
 
 type PublicModelStatus struct {
@@ -981,6 +1010,14 @@ func (s Store) PublicStatus(ctx context.Context, now time.Time) (PublicStatus, e
 	if err != nil {
 		return PublicStatus{}, err
 	}
+	regionNodeCounts, err := s.regionNodeCounts(ctx, now)
+	if err != nil {
+		return PublicStatus{}, err
+	}
+	hosts, err := s.publicHosts(ctx, now)
+	if err != nil {
+		return PublicStatus{}, err
+	}
 	var completed24h, completedTotal int64
 	if err := s.Pool.QueryRow(ctx, `
 SELECT count(*) FILTER (WHERE completed_at >= $1),
@@ -1008,6 +1045,8 @@ WHERE jr.accepted
 		ModelsAvailable:           modelsAvailable,
 		Models:                    publicModels,
 		RegionsOnline:             regionsOnline,
+		RegionNodeCounts:          regionNodeCounts,
+		Hosts:                     hosts,
 		JobsCompleted24h:          completed24h,
 		JobsCompletedTotal:        completedTotal,
 		OutputTokensServed24h:     output24h,
@@ -1273,6 +1312,110 @@ ORDER BY region
 		regions = append(regions, region)
 	}
 	return regions, rows.Err()
+}
+
+// regionNodeCounts aggregates currently online nodes per region for the public
+// map. It uses the same liveness rule as regionsOnline so the map and the
+// region list can never disagree.
+func (s Store) regionNodeCounts(ctx context.Context, now time.Time) ([]RegionNodeCount, error) {
+	rows, err := s.Pool.Query(ctx, `
+SELECT COALESCE(NULLIF(n.region, ''), NULLIF(f.region, '')) AS effective_region, count(*)
+FROM nodes n
+LEFT JOIN fleets f ON f.id = n.fleet_id
+JOIN LATERAL (
+  SELECT state, COALESCE(last_heartbeat_at, connected_at) AS freshness
+  FROM node_sessions
+  WHERE node_id = n.id
+  ORDER BY connected_at DESC
+  LIMIT 1
+) ns ON true
+WHERE ns.state IN ('connected', 'draining')
+  AND ns.freshness >= $1
+  AND COALESCE(NULLIF(n.region, ''), NULLIF(f.region, '')) IS NOT NULL
+GROUP BY effective_region
+ORDER BY effective_region
+`, now.Add(-s.staleAfter()))
+	if err != nil {
+		return nil, fmt.Errorf("query region node counts: %w", err)
+	}
+	defer rows.Close()
+	counts := []RegionNodeCount{}
+	for rows.Next() {
+		var count RegionNodeCount
+		if err := rows.Scan(&count.Region, &count.NodeCount); err != nil {
+			return nil, fmt.Errorf("scan region node count: %w", err)
+		}
+		counts = append(counts, count)
+	}
+	return counts, rows.Err()
+}
+
+// publicHosts lists machines that have held a session in the last 24 hours,
+// with what each has earned. Credit comes from host_credit_holds, which carries
+// node_id directly and holds exactly one row per accepted attempt, so summing
+// it cannot double count a credit that has moved from pending to available.
+// Reversed credit is excluded: it was not earned.
+func (s Store) publicHosts(ctx context.Context, now time.Time) ([]PublicHostStatus, error) {
+	rows, err := s.Pool.Query(ctx, `
+WITH latest_session AS (
+  SELECT DISTINCT ON (node_id) node_id, state,
+         COALESCE(last_heartbeat_at, connected_at) AS freshness
+  FROM node_sessions
+  ORDER BY node_id, connected_at DESC
+),
+credit AS (
+  SELECT node_id,
+         count(*) FILTER (WHERE created_at >= $1) AS jobs_24h,
+         COALESCE(SUM(amount_microdollars) FILTER (WHERE created_at >= $1), 0) AS credited_24h,
+         COALESCE(SUM(amount_microdollars), 0) AS credited_total
+  FROM host_credit_holds
+  WHERE state <> 'reversed'
+  GROUP BY node_id
+)
+SELECT n.id,
+       COALESCE(NULLIF(n.region, ''), NULLIF(f.region, ''), '') AS region,
+       n.state,
+       ls.state,
+       ls.freshness >= $2 AS fresh,
+       COALESCE(c.jobs_24h, 0),
+       COALESCE(c.credited_24h, 0),
+       COALESCE(c.credited_total, 0)
+FROM nodes n
+LEFT JOIN fleets f ON f.id = n.fleet_id
+JOIN latest_session ls ON ls.node_id = n.id
+LEFT JOIN credit c ON c.node_id = n.id
+WHERE ls.freshness >= $1
+ORDER BY COALESCE(c.credited_total, 0) DESC, n.id
+`, now.Add(-24*time.Hour), now.Add(-s.staleAfter()))
+	if err != nil {
+		return nil, fmt.Errorf("query public hosts: %w", err)
+	}
+	defer rows.Close()
+	hosts := []PublicHostStatus{}
+	for rows.Next() {
+		var nodeID, region, nodeState, sessionState string
+		var fresh bool
+		var host PublicHostStatus
+		if err := rows.Scan(&nodeID, &region, &nodeState, &sessionState, &fresh,
+			&host.Jobs24h, &host.CreditedMicrodollars24h, &host.CreditedMicrodollarsTotal); err != nil {
+			return nil, fmt.Errorf("scan public host: %w", err)
+		}
+		host.Handle = HostHandle(nodeID)
+		host.Region = region
+		host.State = publicHostState(nodeState, sessionState, fresh)
+		hosts = append(hosts, host)
+	}
+	return hosts, rows.Err()
+}
+
+func publicHostState(nodeState, sessionState string, fresh bool) string {
+	if !fresh || (sessionState != "connected" && sessionState != "draining") {
+		return HostStateOffline
+	}
+	if nodeState == "BUSY" {
+		return HostStateServing
+	}
+	return HostStateIdle
 }
 
 func (s Store) ContributionCard(ctx context.Context, nodeID string, now time.Time) (ContributionCard, error) {

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a live host earnings ticker to the public catalog: `/v1/status` now carries a `hosts` array of anonymous adjective-animal handles with region, state, 24h jobs, and 24h/lifetime host credit, summed from `host_credit_holds`. No node id, hostname, GPU, or fleet ever appears.
+- Added `region_node_counts` to `/v1/status` and a full-bleed dot-matrix world map as the opening visual above the wordmark, drawn from a committed Natural Earth land mask with per-region heat, a subtle breathe animation, and native hover tooltips.
+
 - Fixed the job accept window being enforced against node-reported timestamps: a host clock a few seconds off NTP failed every accept with "not accepted within the offer window" and the session was torn down. All authoritative job-lifecycle times now come from the coordinator clock; node timestamps are informational only. job_failed responses also moved from HTTP 502 to 503 so Cloudflare stops masking the JSON error body, and job-message handling errors are now logged before closing a session.
 
 - Fixed the job.offer schema rejecting real catalog model ids: the Milestone 0 pattern only allowed `thirdshift-*-vN` names, so offers for `qwen2.5-7b-instruct` failed the coordinator's own outbound validation. Also logs the previously swallowed scheduling error.
