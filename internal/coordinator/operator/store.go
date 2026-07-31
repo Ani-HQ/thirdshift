@@ -1140,7 +1140,7 @@ func (c publicModelCapacity) state() string {
 func (s Store) publicModelCapacity(ctx context.Context, modelID string, freshnessCutoff time.Time) (publicModelCapacity, error) {
 	rows, err := s.Pool.Query(ctx, `
 WITH latest_model AS (
-  SELECT mv.id AS model_version_id, ma.sha256 AS model_sha256, rr.binary_sha256 AS runtime_sha256
+  SELECT mv.id AS model_version_id, ma.sha256 AS model_sha256, rr.id AS runtime_release_id
   FROM model_versions mv
   JOIN model_artifacts ma ON ma.model_version_id = mv.id AND ma.artifact_type = 'gguf'
   LEFT JOIN runtime_releases rr ON rr.id = mv.runtime_release_id
@@ -1158,7 +1158,11 @@ SELECT COALESCE(NULLIF(n.region, ''), NULLIF(f.region, ''), '') AS region,
          AND hb.paused = false
          AND hb.draining = false
          AND hb.model_hash = 'sha256:' || lm.model_sha256
-         AND hb.runtime_hash = 'sha256:' || lm.runtime_sha256
+         AND EXISTS (
+           SELECT 1 FROM runtime_release_artifacts rra
+           WHERE rra.runtime_release_id = lm.runtime_release_id
+             AND hb.runtime_hash = 'sha256:' || rra.sha256
+         )
          AND NOT EXISTS (
            SELECT 1 FROM job_attempts ja
            WHERE ja.node_id = n.id AND ja.status IN ('offered', 'accepted', 'running')
