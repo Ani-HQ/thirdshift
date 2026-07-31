@@ -12,57 +12,84 @@ const stateLabels: Record<PublicHost["state"], string> = {
 
 /**
  * A single quiet line of who is contributing and what they have earned. With no
- * hosts it renders nothing at all rather than an empty strip, and it scrolls
- * only when there are more entries than comfortably fit.
+ * hosts it renders nothing at all rather than an empty strip. It always drifts
+ * slowly (founder call: ambient motion over strict overflow-gating); when the
+ * entries are narrower than the strip they repeat until the loop is seamless.
+ * prefers-reduced-motion still stops the animation entirely via CSS.
  */
 export function EarningsTicker({ hosts }: { hosts: PublicHost[] }) {
   const risen = useRisenHandles(hosts);
-  const { trackRef, scrolls } = useOverflowScroll(hosts.length);
+  const { trackRef, repeat, durationSeconds } = useSeamlessDrift(hosts.length);
 
   if (hosts.length === 0) {
     return null;
   }
 
-  const entries = hosts.map((host) => (
-    <span className={`ticker-entry${risen.has(host.handle) ? " risen" : ""}`} key={host.handle}>
-      <span className="ticker-handle">{host.handle}</span>
-      {host.region ? <span className="ticker-part">{host.region}</span> : null}
-      <span className="ticker-part">{stateLabels[host.state] || host.state}</span>
-      <span className="ticker-earned">{formatEarnings(host.credited_microdollars_total)} earned</span>
-    </span>
-  ));
+  const renderEntries = (copy: number) =>
+    hosts.map((host) => (
+      <span
+        className={`ticker-entry${risen.has(host.handle) ? " risen" : ""}`}
+        key={`${copy}-${host.handle}`}
+      >
+        <span className="ticker-handle">{host.handle}</span>
+        {host.region ? <span className="ticker-part">{host.region}</span> : null}
+        <span className="ticker-part">{stateLabels[host.state] || host.state}</span>
+        <span className="ticker-earned">{formatEarnings(host.credited_microdollars_total)} earned</span>
+      </span>
+    ));
+
+  const run: ReturnType<typeof renderEntries> = [];
+  for (let copy = 0; copy < repeat; copy++) {
+    run.push(...renderEntries(copy));
+  }
 
   return (
     <section className="ticker" aria-label="Contributing hosts">
-      <div ref={trackRef} className={`ticker-track${scrolls ? " scrolling" : ""}`}>
-        <div className="ticker-run">{entries}</div>
-        {scrolls ? (
-          <div className="ticker-run" aria-hidden="true">
-            {entries}
-          </div>
-        ) : null}
+      <div
+        ref={trackRef}
+        className="ticker-track scrolling"
+        style={{ animationDuration: `${durationSeconds}s` }}
+      >
+        <div className="ticker-run">{run}</div>
+        <div className="ticker-run" aria-hidden="true">
+          {run}
+        </div>
       </div>
     </section>
   );
 }
 
+const DRIFT_PX_PER_SECOND = 14;
+
 /**
- * Scrolls only when the entries genuinely do not fit. Measuring beats guessing
- * from a host count: one long handle can overflow where three short ones fit.
+ * Repeats the entry set until one run is at least as wide as the strip, so the
+ * translateX(-100%) loop never shows a gap, and derives the animation duration
+ * from the measured run width so drift speed is constant regardless of how
+ * many entries exist. Measuring beats guessing from a host count: one long
+ * handle can overflow where three short ones fit.
  */
-function useOverflowScroll(hostCount: number) {
+function useSeamlessDrift(hostCount: number) {
   const trackRef = useRef<HTMLDivElement | null>(null);
-  const [scrolls, setScrolls] = useState(false);
+  const [repeat, setRepeat] = useState(1);
+  const [durationSeconds, setDurationSeconds] = useState(48);
 
   const measure = useCallback(() => {
     const track = trackRef.current;
     const strip = track?.parentElement;
-    if (!track || !strip) {
+    const run = track?.firstElementChild as HTMLElement | null;
+    if (!track || !strip || !run || run.scrollWidth === 0) {
       return;
     }
-    const run = track.firstElementChild as HTMLElement | null;
-    const contentWidth = run ? run.scrollWidth : track.scrollWidth;
-    setScrolls(contentWidth > strip.clientWidth + 1);
+    setRepeat((current) => {
+      const baseWidth = run.scrollWidth / current;
+      if (baseWidth <= 0) {
+        return current;
+      }
+      const needed = Math.max(1, Math.ceil((strip.clientWidth + 1) / baseWidth));
+      const runWidth = baseWidth * needed;
+      setDurationSeconds(Math.max(20, Math.round(runWidth / DRIFT_PX_PER_SECOND)));
+      return needed;
+    });
   }, []);
 
   useEffect(() => {
@@ -76,9 +103,9 @@ function useOverflowScroll(hostCount: number) {
       observer.observe(trackRef.current.parentElement);
     }
     return () => observer.disconnect();
-  }, [measure, hostCount]);
+  }, [measure, hostCount, repeat]);
 
-  return { trackRef, scrolls };
+  return { trackRef, repeat, durationSeconds };
 }
 
 /**
