@@ -1187,7 +1187,11 @@ JOIN LATERAL (
 ) hb ON true
 WHERE ns.freshness >= $2
   AND hb.model_hash = 'sha256:' || lm.model_sha256
-  AND hb.runtime_hash = 'sha256:' || lm.runtime_sha256
+  AND EXISTS (
+    SELECT 1 FROM runtime_release_artifacts rra
+    WHERE rra.runtime_release_id = lm.runtime_release_id
+      AND hb.runtime_hash = 'sha256:' || rra.sha256
+  )
 `, modelID, freshnessCutoff)
 	if err != nil {
 		return publicModelCapacity{}, fmt.Errorf("query public model capacity: %w", err)
