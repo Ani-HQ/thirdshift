@@ -293,10 +293,12 @@ describe("console components", () => {
     });
     stubStatusFetch(status);
     render(<PublicStatusPage initialStatus={status} />);
-    expect(screen.getByText("amber-falcon")).toBeInTheDocument();
-    expect(screen.getByText("slate-otter")).toBeInTheDocument();
-    expect(screen.getByText("$0.000004 earned")).toBeInTheDocument();
-    expect(screen.getByText("$12.50 earned")).toBeInTheDocument();
+    // The ticker always drifts, so entries render in duplicated (and possibly
+    // repeated) runs for a seamless loop — assert presence, not uniqueness.
+    expect(screen.getAllByText("amber-falcon").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("slate-otter").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("$0.000004 earned").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("$12.50 earned").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("serving").length).toBeGreaterThan(0);
   });
 
