@@ -176,6 +176,7 @@ func (o Options) chatCompletionsHandler() developerHandler {
 				o.writeAPIError(w, apiErr, requestID)
 				return
 			}
+			o.logger().ErrorContext(r.Context(), "schedule failed", "request_id", requestID, "job_id", jobID, "error", err)
 			o.writeAPIError(w, jobs.APIError{Code: jobs.CodeInternalError, Message: "Could not schedule job.", Retryable: true, Status: 500}, requestID)
 			return
 		}
