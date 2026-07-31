@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed the job accept window being enforced against node-reported timestamps: a host clock a few seconds off NTP failed every accept with "not accepted within the offer window" and the session was torn down. All authoritative job-lifecycle times now come from the coordinator clock; node timestamps are informational only. job_failed responses also moved from HTTP 502 to 503 so Cloudflare stops masking the JSON error body, and job-message handling errors are now logged before closing a session.
+
 - Fixed the job.offer schema rejecting real catalog model ids: the Milestone 0 pattern only allowed `thirdshift-*-vN` names, so offers for `qwen2.5-7b-instruct` failed the coordinator's own outbound validation. Also logs the previously swallowed scheduling error.
 
 - Fixed scheduler eligibility and result verification comparing node runtime hashes against a single expected binary hash: runtime releases now record per-platform artifact hashes (migration `000012`), so Windows nodes are eligible instead of only nodes matching the manifest's one pinned binary. Found when the first Windows node sat AVAILABLE yet every request returned no_capacity.
