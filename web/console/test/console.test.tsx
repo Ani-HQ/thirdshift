@@ -320,7 +320,12 @@ describe("console components", () => {
   });
 
   it("world map is the full-bleed opening visual above the brand and headline", () => {
-    const status = publicStatusFixture({ region_node_counts: [{ region: "in-south", node_count: 1 }] });
+    // A host is present so the ticker actually renders and its place in the
+    // flow can be asserted; with no hosts it collapses by design.
+    const status = publicStatusFixture({
+      hosts: [hostFixture()],
+      region_node_counts: [{ region: "in-south", node_count: 1 }]
+    });
     stubStatusFetch(status);
     const { container } = render(<PublicStatusPage initialStatus={status} />);
 
