@@ -355,7 +355,7 @@ func newM4Env(t *testing.T, logOutput io.Writer) *m4Env {
 		t.Fatalf("model hashes: %v", err)
 	}
 	env.modelHash = hashes.ModelHash
-	env.runtimeHash = hashes.RuntimeHash
+	env.runtimeHash = hashes.RuntimeHashes[0]
 	return env
 }
 

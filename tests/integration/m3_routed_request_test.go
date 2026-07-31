@@ -100,7 +100,7 @@ func TestRoutedDeveloperRequestEndToEnd(t *testing.T) {
 			Runtime: routingRuntime{
 				status: nodeagent.RuntimeStatus{
 					ModelID:     "thirdshift-tiny-chat-v1",
-					RuntimeHash: hashes.RuntimeHash,
+					RuntimeHash: hashes.RuntimeHashes[0],
 					ModelHash:   hashes.ModelHash,
 					BaseURL:     runtimeControl.server.URL,
 				},
