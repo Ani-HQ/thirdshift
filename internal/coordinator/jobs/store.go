@@ -16,6 +16,7 @@ import (
 
 	"github.com/Ani-HQ/thirdshift/internal/coordinator/ledger"
 	"github.com/Ani-HQ/thirdshift/internal/node/models"
+	noderuntime "github.com/Ani-HQ/thirdshift/internal/node/runtime"
 	"github.com/Ani-HQ/thirdshift/internal/shared/ids"
 	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 	"github.com/jackc/pgx/v5"
@@ -250,6 +251,9 @@ RETURNING id
 	if err != nil {
 		return fmt.Errorf("upsert runtime release: %w", err)
 	}
+	if err := s.upsertRuntimeArtifacts(ctx, tx, actualRuntimeID, manifest, manifestPath); err != nil {
+		return err
+	}
 
 	versionID, err := ids.New("mv")
 	if err != nil {
@@ -428,7 +432,6 @@ func (s PGStore) ModelInfo(ctx context.Context, modelID string, freshnessCutoff 
 				return ModelInfo{}, err
 			}
 			model.ModelHash = hashes.ModelHash
-			model.RuntimeHash = hashes.RuntimeHash
 			return model, nil
 		}
 	}
@@ -436,26 +439,57 @@ func (s PGStore) ModelInfo(ctx context.Context, modelID string, freshnessCutoff 
 }
 
 type modelHashes struct {
-	ModelHash   string
-	RuntimeHash string
+	ModelHash string
+	// RuntimeHashes holds every valid runtime binary hash for the model's
+	// pinned release — one per platform. Nodes report the hash of their own
+	// platform's binary, so validity is set membership, not equality.
+	RuntimeHashes []string
+}
+
+func (hashes modelHashes) RuntimeHashValid(hash string) bool {
+	for _, candidate := range hashes.RuntimeHashes {
+		if candidate == hash {
+			return true
+		}
+	}
+	return false
 }
 
 func (s PGStore) ModelHashes(ctx context.Context, modelID string) (modelHashes, error) {
 	var hashes modelHashes
+	var releaseID *string
 	err := s.Pool.QueryRow(ctx, `
-SELECT 'sha256:' || ma.sha256, 'sha256:' || rr.binary_sha256
+SELECT 'sha256:' || ma.sha256, mv.runtime_release_id
 FROM model_versions mv
 JOIN model_artifacts ma ON ma.model_version_id = mv.id AND ma.artifact_type = 'gguf'
-LEFT JOIN runtime_releases rr ON rr.id = mv.runtime_release_id
 WHERE mv.model_id = $1
 ORDER BY mv.created_at DESC
 LIMIT 1
-`, modelID).Scan(&hashes.ModelHash, &hashes.RuntimeHash)
+`, modelID).Scan(&hashes.ModelHash, &releaseID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return modelHashes{}, APIError{Code: CodeModelNotFound, Message: "Model not found.", Retryable: false, Status: 404}
 	}
 	if err != nil {
 		return modelHashes{}, fmt.Errorf("lookup model hashes: %w", err)
+	}
+	if releaseID != nil {
+		rows, err := s.Pool.Query(ctx, `
+SELECT 'sha256:' || sha256 FROM runtime_release_artifacts WHERE runtime_release_id = $1
+`, *releaseID)
+		if err != nil {
+			return modelHashes{}, fmt.Errorf("lookup runtime artifact hashes: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var hash string
+			if err := rows.Scan(&hash); err != nil {
+				return modelHashes{}, fmt.Errorf("scan runtime artifact hash: %w", err)
+			}
+			hashes.RuntimeHashes = append(hashes.RuntimeHashes, hash)
+		}
+		if err := rows.Err(); err != nil {
+			return modelHashes{}, fmt.Errorf("read runtime artifact hashes: %w", err)
+		}
 	}
 	return hashes, nil
 }
@@ -526,7 +560,11 @@ WHERE n.state = 'AVAILABLE'
   AND n.quarantined_at IS NULL
   AND ns.freshness >= $2
   AND hb.model_hash = 'sha256:' || ma.sha256
-  AND hb.runtime_hash = 'sha256:' || rr.binary_sha256
+  AND EXISTS (
+    SELECT 1 FROM runtime_release_artifacts rra
+    WHERE rra.runtime_release_id = rr.id
+      AND hb.runtime_hash = 'sha256:' || rra.sha256
+  )
   AND hb.schedule_state = 'in_window'
   AND hb.thermal_state = 'normal'
   AND hb.paused = false
@@ -1414,4 +1452,45 @@ WHERE node_id = $1
 		}
 	}
 	return quarantine, nil
+}
+
+// upsertRuntimeArtifacts records every per-platform binary hash of the
+// model's pinned runtime release. Nodes report the hash of their own
+// platform's binary, so scheduler eligibility and result verification check
+// membership in this set rather than a single value.
+func (s PGStore) upsertRuntimeArtifacts(ctx context.Context, tx pgx.Tx, runtimeReleaseID string, manifest models.Manifest, manifestPath string) error {
+	name := manifest.Runtime.ReleaseManifest
+	if name == "" {
+		return nil
+	}
+	var data []byte
+	var source string
+	var err error
+	if filepath.IsAbs(name) {
+		data, err = os.ReadFile(name)
+		source = name
+	} else {
+		data, source, err = models.ReadCatalogFile(filepath.Dir(manifestPath), name)
+	}
+	if err != nil {
+		return fmt.Errorf("read runtime release manifest for %s: %w", manifest.ModelID, err)
+	}
+	release, err := noderuntime.ParseReleaseManifest(data, source)
+	if err != nil {
+		return err
+	}
+	for platformKey, artifact := range release.Artifacts {
+		artifactID, err := ids.New("rra")
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+INSERT INTO runtime_release_artifacts (id, runtime_release_id, platform_key, sha256)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (runtime_release_id, platform_key) DO UPDATE SET sha256 = EXCLUDED.sha256
+`, artifactID, runtimeReleaseID, platformKey, rawSHA256(artifact.SHA256)); err != nil {
+			return fmt.Errorf("upsert runtime artifact %s/%s: %w", manifest.ModelID, platformKey, err)
+		}
+	}
+	return nil
 }

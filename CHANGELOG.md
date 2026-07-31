@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed scheduler eligibility and result verification comparing node runtime hashes against a single expected binary hash: runtime releases now record per-platform artifact hashes (migration `000012`), so Windows nodes are eligible instead of only nodes matching the manifest's one pinned binary. Found when the first Windows node sat AVAILABLE yet every request returned no_capacity.
+
 - Fixed released binaries failing at startup outside a repo checkout: protocol schemas and the model catalog (including runtime release manifests) are now embedded in the binary, with disk copies taking precedence when present. Found by the first real installer-based node start on Windows.
 
 - Fixed the RAM minimum rejecting real 16 GB machines: Windows reports usable RAM (~15.9 GB on a 16 GB host), so the doctor floor and 7B manifest minimums now use 15 GiB usable as the "16 GB installed" proxy. Found on first real-hardware verification (RTX 3060 Ti host).

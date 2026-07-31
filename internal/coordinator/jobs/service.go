@@ -439,7 +439,7 @@ func (s *Service) verifyCompletion(ctx context.Context, nodeID string, payload p
 	if payload.ModelHash != hashes.ModelHash {
 		return fmt.Errorf("model hash mismatch")
 	}
-	if payload.RuntimeHash != hashes.RuntimeHash {
+	if !hashes.RuntimeHashValid(payload.RuntimeHash) {
 		return fmt.Errorf("runtime hash mismatch")
 	}
 	publicEncoded, err := s.Store.PublicKeyForNode(ctx, nodeID)
