@@ -49,15 +49,20 @@ func (p *LocalRuntimeProvider) Prepare(ctx context.Context, modelID string) (Run
 		p.ModelQuotaBytes = defaultModelQuotaBytes
 	}
 
-	manifest, manifestPath, err := models.LoadCatalogManifest(p.CatalogDir, modelID)
+	manifest, _, err := models.LoadCatalogManifest(p.CatalogDir, modelID)
 	if err != nil {
 		return RuntimeStatus{}, err
 	}
-	runtimeManifestPath := manifest.Runtime.ReleaseManifest
-	if !filepath.IsAbs(runtimeManifestPath) {
-		runtimeManifestPath = filepath.Join(filepath.Dir(manifestPath), runtimeManifestPath)
+	var runtimeManifest noderuntime.ReleaseManifest
+	if runtimeManifestName := manifest.Runtime.ReleaseManifest; filepath.IsAbs(runtimeManifestName) {
+		runtimeManifest, err = noderuntime.LoadReleaseManifest(runtimeManifestName)
+	} else {
+		data, source, readErr := models.ReadCatalogFile(p.CatalogDir, runtimeManifestName)
+		if readErr != nil {
+			return RuntimeStatus{}, readErr
+		}
+		runtimeManifest, err = noderuntime.ParseReleaseManifest(data, source)
 	}
-	runtimeManifest, err := noderuntime.LoadReleaseManifest(runtimeManifestPath)
 	if err != nil {
 		return RuntimeStatus{}, err
 	}

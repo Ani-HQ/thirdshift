@@ -54,9 +54,15 @@ func LoadReleaseManifest(path string) (ReleaseManifest, error) {
 	if err != nil {
 		return ReleaseManifest{}, fmt.Errorf("read runtime manifest %s: %w", path, err)
 	}
+	return ParseReleaseManifest(data, path)
+}
+
+// ParseReleaseManifest decodes a runtime release manifest from bytes; source
+// is used only for error messages.
+func ParseReleaseManifest(data []byte, source string) (ReleaseManifest, error) {
 	var manifest ReleaseManifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return ReleaseManifest{}, fmt.Errorf("parse runtime manifest %s: %w", path, err)
+		return ReleaseManifest{}, fmt.Errorf("parse runtime manifest %s: %w", source, err)
 	}
 	return manifest, nil
 }

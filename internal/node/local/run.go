@@ -59,15 +59,20 @@ func Run(ctx context.Context, opts RunOptions) error {
 		opts.ModelQuotaBytes = defaultModelQuotaBytes
 	}
 
-	manifest, manifestPath, err := models.LoadCatalogManifest(opts.CatalogDir, opts.ModelID)
+	manifest, _, err := models.LoadCatalogManifest(opts.CatalogDir, opts.ModelID)
 	if err != nil {
 		return err
 	}
-	runtimeManifestPath := manifest.Runtime.ReleaseManifest
-	if !filepath.IsAbs(runtimeManifestPath) {
-		runtimeManifestPath = filepath.Join(filepath.Dir(manifestPath), runtimeManifestPath)
+	var runtimeManifest noderuntime.ReleaseManifest
+	if runtimeManifestName := manifest.Runtime.ReleaseManifest; filepath.IsAbs(runtimeManifestName) {
+		runtimeManifest, err = noderuntime.LoadReleaseManifest(runtimeManifestName)
+	} else {
+		data, source, readErr := models.ReadCatalogFile(opts.CatalogDir, runtimeManifestName)
+		if readErr != nil {
+			return readErr
+		}
+		runtimeManifest, err = noderuntime.ParseReleaseManifest(data, source)
 	}
-	runtimeManifest, err := noderuntime.LoadReleaseManifest(runtimeManifestPath)
 	if err != nil {
 		return err
 	}
