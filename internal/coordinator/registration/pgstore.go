@@ -225,19 +225,22 @@ VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), $9::
 `, heartbeatID, heartbeat.NodeID, sessionID, heartbeat.Sequence, heartbeat.State, heartbeat.ModelID, heartbeat.RuntimeHash, heartbeat.ModelHash, string(gpu), heartbeat.ActiveJobID, heartbeat.ScheduleState, heartbeat.ThermalState, heartbeat.Paused, heartbeat.Draining, heartbeat.UptimeSeconds, receivedAt, heartbeat.Timestamp); err != nil {
 		return fmt.Errorf("insert heartbeat: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
-UPDATE node_sessions
-SET last_heartbeat_at = $2
-WHERE id = $1;
-`, sessionID, receivedAt); err != nil {
-		return fmt.Errorf("update session heartbeat: %w", err)
-	}
+	// Lock-order convention: every transaction touching both tables locks
+	// the nodes row BEFORE the node_sessions row. The operator drain path
+	// does the same; opposite orders deadlocked under load (SQLSTATE 40P01).
 	if _, err := tx.Exec(ctx, `
 UPDATE nodes
 SET state = $2, current_model_id = NULLIF($3, ''), last_seen_at = $4, updated_at = $4
 WHERE id = $1;
 `, heartbeat.NodeID, heartbeat.State, heartbeat.ModelID, receivedAt); err != nil {
 		return fmt.Errorf("update node heartbeat state: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE node_sessions
+SET last_heartbeat_at = $2
+WHERE id = $1;
+`, sessionID, receivedAt); err != nil {
+		return fmt.Errorf("update session heartbeat: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit record heartbeat: %w", err)
@@ -296,19 +299,20 @@ func (s PGStore) CloseSession(ctx context.Context, sessionID, nodeID string, now
 		return fmt.Errorf("begin close node session: %w", err)
 	}
 	defer tx.Rollback(context.Background())
-	if _, err := tx.Exec(ctx, `
-UPDATE node_sessions
-SET state = 'closed', disconnected_at = $2
-WHERE id = $1 AND state = 'connected';
-`, sessionID, now); err != nil {
-		return fmt.Errorf("close node session: %w", err)
-	}
+	// Lock-order convention: nodes before node_sessions (see RecordHeartbeat).
 	if _, err := tx.Exec(ctx, `
 UPDATE nodes
 SET state = 'OFFLINE', updated_at = $2
 WHERE id = $1;
 `, nodeID, now); err != nil {
 		return fmt.Errorf("mark node offline: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE node_sessions
+SET state = 'closed', disconnected_at = $2
+WHERE id = $1 AND state = 'connected';
+`, sessionID, now); err != nil {
+		return fmt.Errorf("close node session: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit close node session: %w", err)
