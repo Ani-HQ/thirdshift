@@ -24,7 +24,7 @@
 - [x] No public runtime ports: runtime launcher rejects non-loopback hosts.
 - [x] Hash verification failure blocks execution.
 - [x] Scheduler placement is in-process and alpha-scale.
-- [ ] Windows 11 x64 NVIDIA installer verified on real hardware. Pending human task.
+- [x] Windows 11 x64 NVIDIA host verified on real hardware (2026-07-31, RTX 3060 Ti).
 - [ ] Five stable cafe nodes enrolled. Pending human pilot.
 - [ ] At least 70% scheduled-hours connected. Pending pilot measurement.
 - [ ] At least 50% connected-hours model-ready. Pending pilot measurement.
@@ -37,7 +37,7 @@
 
 - [ ] Generate real release signing key and replace placeholder public key.
 - [ ] Publish first draft release after CI completes.
-- [ ] Run `scripts/verify-windows.ps1` on a real Windows host. See docs/WINDOWS_VERIFICATION.md (TEMPORARY file — delete it, and this pointer, in the PR that records the results, before publishing the draft release).
+- [x] Run `scripts/verify-windows.ps1` on a real Windows host. Verified 2026-07-31 on Windows 11 x64, RTX 3060 Ti (8GB), driver 610.47: build, doctor, local GPU completion, live registration/heartbeat, thermal query, configure/pause/resume all PASS; admin-only checks skipped by design. Found and fixed the 16GB-RAM strict-compare bug (real 16GB hosts report ~15.9GB usable).
 - [ ] Record demo video from [docs/DEMO.md](DEMO.md).
 - [ ] Flip repository visibility. Human task.
 - [ ] Configure public domain and Caddy/TLS. Human task.

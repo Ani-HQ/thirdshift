@@ -36,7 +36,7 @@ runtime:
     port: dynamic
 hardware:
   min_vram_mb: 8192
-  min_ram_mb: 16384
+  min_ram_mb: 15360
   min_disk_mb: 12000
   eligible_gpu_classes:
     - ts-nvidia-8gb-v1

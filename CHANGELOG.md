@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed the RAM minimum rejecting real 16 GB machines: Windows reports usable RAM (~15.9 GB on a 16 GB host), so the doctor floor and 7B manifest minimums now use 15 GiB usable as the "16 GB installed" proxy. Found on first real-hardware verification (RTX 3060 Ti host).
 - Llama 3.2 Community License signed off (2026-07-30) with manifest-driven compliance: "Built with Llama" attribution, license notice, and AUP link on the public catalog; the vendored license agreement is written next to the cached model on every host via `license.distribute_with_model`; model preparation fails if required license distribution is impossible (migration `000011`).
 
 - Added public model catalog data to `/v1/status`: model cards, public prices, limits, aggregate availability state, regions, requester-region hint, and 24-hour median output speed.
