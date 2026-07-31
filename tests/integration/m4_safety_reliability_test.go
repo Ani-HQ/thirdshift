@@ -176,7 +176,7 @@ func TestM4ThermalHardLimitTerminatesRunningAttempt(t *testing.T) {
 	waitForHoldSignal(t, runtime.holdStarted, done, "thermal hard completion")
 	telemetry.setTemp(90)
 	result := waitForHTTPResult(t, done, "thermal hard completion")
-	if result.status != http.StatusBadGateway {
+	if result.status != http.StatusServiceUnavailable {
 		t.Fatalf("hard-limit completion status = %d body=%s", result.status, string(result.body))
 	}
 	assertAPIErrorCode(t, result.body, jobs.CodeJobFailed)
