@@ -17,7 +17,11 @@ import (
 
 const (
 	MinimumVRAMBytes = uint64(8 * 1024 * 1024 * 1024)
-	MinimumRAMBytes  = uint64(16 * 1024 * 1024 * 1024)
+	// MinimumRAMBytes is the "16 GB installed" floor. Windows reports usable
+	// RAM after hardware reservations, so a real 16 GB machine shows ~15.9 GB;
+	// a strict 16 GiB compare would fail every 16 GB gaming PC. 15 GiB usable
+	// only admits machines with at least 16 GB installed in practice.
+	MinimumRAMBytes  = uint64(15 * 1024 * 1024 * 1024)
 	MinimumDiskBytes = uint64(40 * 1024 * 1024 * 1024)
 )
 
@@ -163,7 +167,7 @@ func checkRAM() CheckResult {
 	}
 	if total < MinimumRAMBytes {
 		result.Status = StatusFail
-		result.Remediation = "Use a host with at least 16 GB RAM."
+		result.Remediation = "Use a host with at least 16 GB installed RAM (the check allows for OS-reserved memory)."
 	}
 	return result
 }
