@@ -2,11 +2,14 @@ package models
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	catalogfs "github.com/Ani-HQ/thirdshift/models/catalog"
 )
 
 // Listing status values describe how a model is presented on the public
@@ -153,9 +156,27 @@ type Verification struct {
 }
 
 func LoadCatalogManifest(catalogDir, modelID string) (Manifest, string, error) {
-	path := filepath.Join(catalogDir, modelID+".yaml")
-	manifest, err := ParseManifestFile(path)
-	return manifest, path, err
+	data, source, err := ReadCatalogFile(catalogDir, modelID+".yaml")
+	if err != nil {
+		return Manifest{}, source, err
+	}
+	manifest, err := parseManifest(fileScanner{Scanner: bufio.NewScanner(bytes.NewReader(data))})
+	return manifest, source, err
+}
+
+// ReadCatalogFile reads a catalog file from disk when present, falling back
+// to the catalog embedded in the binary. Released binaries run from arbitrary
+// working directories with no repo checkout, so the embedded copy is what
+// makes `thirdshift start` work after a plain install.
+func ReadCatalogFile(catalogDir, name string) ([]byte, string, error) {
+	path := filepath.Join(catalogDir, name)
+	if data, err := os.ReadFile(path); err == nil {
+		return data, path, nil
+	}
+	if data, err := catalogfs.FS.ReadFile(name); err == nil {
+		return data, "embedded:" + name, nil
+	}
+	return nil, path, fmt.Errorf("catalog file %s not found on disk (%s) or in the embedded catalog", name, path)
 }
 
 func ParseManifestFile(path string) (Manifest, error) {
