@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { publicFetch, publicPost } from "../lib/api";
+import { EarningsTicker } from "./EarningsTicker";
+import { WorldMap } from "./WorldMap";
 import { comparisonDiscountPercent, formatComparisonLine, formatPricePerMillion } from "../lib/pricing";
 import type { ExpectedVolumeBand, PublicCatalogModel, PublicStatus } from "../lib/types";
 
@@ -115,6 +117,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
 
   return (
     <main className="public-page">
+      <WorldMap regionCounts={status?.region_node_counts || []} />
       <div className="public-column">
         <header className="public-header">
           <p className="wordmark">Thirdshift</p>
@@ -124,6 +127,8 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
             you are building and we will keep you posted.
           </p>
         </header>
+
+        <EarningsTicker hosts={status?.hosts || []} />
 
         <section className="figures" aria-label="Network status">
           <Figure label="Nodes online" value={status ? String(status.connected_node_count) : null} />

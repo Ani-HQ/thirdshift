@@ -280,9 +280,11 @@ body:has(.public-page) {
 }
 
 .public-column {
+  position: relative;
   width: min(880px, 100%);
   margin: 0 auto;
-  padding: 72px 24px 56px;
+  padding: 0 24px 56px;
+  margin-top: clamp(-72px, -4vw, -24px);
 }
 
 .public-page h1,
@@ -373,6 +375,135 @@ body:has(.public-page) {
   margin-top: 14px;
   color: var(--pub-secondary);
   font-size: 16px;
+}
+
+/* Dot-matrix world map: the opening visual, full bleed above the wordmark.
+   An equirectangular world is inherently about 2.6:1, so at full width it is
+   naturally tall. Rather than crop populated latitudes to force a shallow band,
+   the lower third fades into the page and the header rides up into it, which
+   reads as a band without losing Europe or the northern US. */
+.world-map {
+  width: 100%;
+  padding-top: 28px;
+  /* The SVG keeps its true 2.6:1 aspect at full width, then the box clips the
+     tail. The mask reaches full transparency before the clip line, so the cut
+     is invisible and only already-faded southern rows are lost. */
+  max-height: clamp(220px, 30vw, 420px);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 38%, transparent 94%);
+  mask-image: linear-gradient(to bottom, #000 38%, transparent 94%);
+  pointer-events: none;
+}
+
+.world-map svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* Heated cells stay interactive so their tooltips still work. */
+.world-map .map-cell.hot {
+  pointer-events: auto;
+}
+
+.map-cell {
+  transition: fill 600ms ease;
+}
+
+.map-cell.hot {
+  animation: map-breathe 3.6s ease-in-out infinite;
+}
+
+@keyframes map-breathe {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Host earnings ticker: one quiet line, no chrome of its own. */
+.ticker {
+  margin-top: 28px;
+  overflow: hidden;
+}
+
+/* Entries fade at the edges instead of being cut mid-word when the strip
+   scrolls. Applied only while scrolling so a static line stays fully legible. */
+.ticker:has(.ticker-track.scrolling) {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+
+.ticker-track {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+}
+
+.ticker-track.scrolling {
+  animation: ticker-drift 48s linear infinite;
+}
+
+.ticker-run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 22px;
+}
+
+.ticker-track.scrolling .ticker-run {
+  flex-wrap: nowrap;
+  padding-right: 22px;
+}
+
+.ticker-entry {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+  border-radius: 4px;
+  color: var(--pub-secondary);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition: background-color 900ms ease;
+}
+
+.ticker-entry.risen {
+  background-color: #f2f2f4;
+}
+
+.ticker-handle {
+  color: var(--pub-text);
+}
+
+.ticker-part::before,
+.ticker-earned::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--pub-line-strong);
+}
+
+@keyframes ticker-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-cell.hot,
+  .ticker-track.scrolling {
+    animation: none;
+  }
 }
 
 .figures {
@@ -692,7 +823,12 @@ body:has(.public-page) {
 
 @media (max-width: 880px) {
   .public-column {
-    padding: 48px 20px 44px;
+    padding: 0 20px 44px;
+    margin-top: clamp(-32px, -4vw, -12px);
+  }
+
+  .world-map {
+    padding-top: 16px;
   }
 
   .figures {

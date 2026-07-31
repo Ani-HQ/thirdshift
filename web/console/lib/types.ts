@@ -122,12 +122,28 @@ export type AuditLog = {
   }>;
 };
 
+export type PublicHost = {
+  handle: string;
+  region?: string;
+  state: "serving" | "idle" | "offline";
+  jobs_24h: number;
+  credited_microdollars_24h: number;
+  credited_microdollars_total: number;
+};
+
+export type RegionNodeCount = {
+  region: string;
+  node_count: number;
+};
+
 export type PublicStatus = {
   connected_node_count: number;
   cities: string[];
   models_available: Array<{ model_id: string; available_nodes: number }>;
   models: PublicCatalogModel[];
   regions_online: string[];
+  region_node_counts: RegionNodeCount[];
+  hosts: PublicHost[];
   requester_region: string | null;
   jobs_completed_24h: number;
   jobs_completed_total: number;

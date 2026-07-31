@@ -6,7 +6,16 @@ import { JobsTable } from "../components/JobsTable";
 import { PublicStatusPage } from "../components/PublicStatusPage";
 import { jobActionPath, nodeActionPath } from "../lib/api";
 import { comparisonDiscountPercent, formatPricePerMillion } from "../lib/pricing";
-import type { JobSummary, NodeSummary, Overview, PublicCatalogModel, PublicStatus } from "../lib/types";
+import { formatEarnings } from "../lib/money";
+import { cellForRegion } from "../lib/regions";
+import type {
+  JobSummary,
+  NodeSummary,
+  Overview,
+  PublicCatalogModel,
+  PublicHost,
+  PublicStatus
+} from "../lib/types";
 
 describe("console components", () => {
   afterEach(() => {
@@ -275,9 +284,93 @@ describe("console components", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   });
 
+  it("earnings ticker renders a line per host", () => {
+    const status = publicStatusFixture({
+      hosts: [
+        hostFixture(),
+        hostFixture({ handle: "slate-otter", region: "us-east", state: "idle", credited_microdollars_total: 12_500_000 })
+      ]
+    });
+    stubStatusFetch(status);
+    render(<PublicStatusPage initialStatus={status} />);
+    expect(screen.getByText("amber-falcon")).toBeInTheDocument();
+    expect(screen.getByText("slate-otter")).toBeInTheDocument();
+    expect(screen.getByText("$0.000004 earned")).toBeInTheDocument();
+    expect(screen.getByText("$12.50 earned")).toBeInTheDocument();
+    expect(screen.getAllByText("serving").length).toBeGreaterThan(0);
+  });
+
+  it("earnings ticker collapses entirely when no hosts are contributing", () => {
+    const status = publicStatusFixture({ hosts: [] });
+    stubStatusFetch(status);
+    const { container } = render(<PublicStatusPage initialStatus={status} />);
+    expect(container.querySelector(".ticker")).toBeNull();
+    expect(container.querySelector(".ticker-entry")).toBeNull();
+  });
+
+  it("formats microdollar earnings without rounding real credit to zero", () => {
+    expect(formatEarnings(4)).toBe("$0.000004");
+    expect(formatEarnings(40)).toBe("$0.00004");
+    expect(formatEarnings(4_000)).toBe("$0.004");
+    expect(formatEarnings(10_000)).toBe("$0.01");
+    expect(formatEarnings(12_500_000)).toBe("$12.50");
+    expect(formatEarnings(1_234_560_000)).toBe("$1,234.56");
+    expect(formatEarnings(0)).toBe("$0.00");
+    expect(formatEarnings(-5)).toBe("$0.00");
+  });
+
+  it("world map is the full-bleed opening visual above the brand and headline", () => {
+    const status = publicStatusFixture({ region_node_counts: [{ region: "in-south", node_count: 1 }] });
+    stubStatusFetch(status);
+    const { container } = render(<PublicStatusPage initialStatus={status} />);
+
+    const page = container.querySelector(".public-page");
+    const map = container.querySelector(".world-map");
+    const wordmark = container.querySelector(".wordmark");
+    const heading = container.querySelector("h1");
+    expect(page).not.toBeNull();
+    expect(map).not.toBeNull();
+
+    // The map is a direct child of the page, not nested in the centred column,
+    // which is what lets it run full bleed.
+    expect(map?.parentElement).toBe(page);
+    expect(map?.closest(".public-column")).toBeNull();
+
+    // ...and it precedes both the brand text and the headline in the document.
+    const precedes = (a: Element | null, b: Element | null) =>
+      Boolean(a && b && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(precedes(map, wordmark)).toBe(true);
+    expect(precedes(map, heading)).toBe(true);
+    expect(precedes(wordmark, heading)).toBe(true);
+
+    // The rest of the flow stays in order: headline, ticker, stats.
+    expect(precedes(heading, container.querySelector(".ticker"))).toBe(true);
+    expect(precedes(container.querySelector(".ticker"), container.querySelector(".figures"))).toBe(true);
+  });
+
+  it("world map darkens a region with connected machines and stays quiet at zero", () => {
+    const quiet = publicStatusFixture({ region_node_counts: [] });
+    stubStatusFetch(quiet);
+    const { container: quietContainer } = render(<PublicStatusPage initialStatus={quiet} />);
+    expect(quietContainer.querySelector(".world-map")).not.toBeNull();
+    expect(quietContainer.querySelectorAll(".map-cell.hot")).toHaveLength(0);
+
+    const busy = publicStatusFixture({ region_node_counts: [{ region: "in-south", node_count: 1 }] });
+    stubStatusFetch(busy);
+    const { container } = render(<PublicStatusPage initialStatus={busy} />);
+    const hot = container.querySelectorAll(".map-cell.hot");
+    expect(hot.length).toBeGreaterThan(0);
+    expect(container.querySelector("title")?.textContent).toBe("in-south · 1 GPU");
+    expect(cellForRegion("in-south")).not.toBeNull();
+    expect(cellForRegion("not-a-region")).toBeNull();
+  });
+
   it("public page never renders node identity or hardware sentinel fields", () => {
     const status = {
-      ...publicStatusFixture(),
+      ...publicStatusFixture({
+        hosts: [hostFixture()],
+        region_node_counts: [{ region: "in-south", node_count: 1 }]
+      }),
       node_names: ["node_01J0M000000000000000000999", "CafeHost-Windows-01"],
       hardware: ["RTX 4090"]
     } as PublicStatus & { node_names: string[]; hardware: string[] };
@@ -286,7 +379,13 @@ describe("console components", () => {
     expect(screen.queryByText("node_01J0M000000000000000000999")).not.toBeInTheDocument();
     expect(screen.queryByText("CafeHost-Windows-01")).not.toBeInTheDocument();
     expect(screen.queryByText("RTX 4090")).not.toBeInTheDocument();
-    expect(screen.queryByText(/GPU/i)).not.toBeInTheDocument();
+    // The map tooltip legitimately says "GPU", so identity is asserted against
+    // the rendered text rather than banning the word outright.
+    const rendered = document.body.textContent || "";
+    for (const secret of ["node_01J0M000000000000000000999", "CafeHost-Windows-01", "RTX 4090"]) {
+      expect(rendered).not.toContain(secret);
+    }
+    expect(rendered).not.toMatch(/node_[0-9A-Z]{20,}/);
   });
 });
 
@@ -323,6 +422,8 @@ function publicStatusFixture(overrides: Partial<PublicStatus> = {}): PublicStatu
     models_available: [{ model_id: "qwen2.5-7b-instruct", available_nodes: 3 }],
     models: [waitlistModelFixture()],
     regions_online: ["in-south"],
+    region_node_counts: [],
+    hosts: [],
     requester_region: "in-south",
     jobs_completed_24h: 42,
     jobs_completed_total: 420,
@@ -364,6 +465,18 @@ function waitlistModelFixture(overrides: Partial<PublicCatalogModel> = {}): Publ
     expected_output_tokens_per_second: 30,
     regions: [],
     version: "8911e8a47f92bac19d6f5c64a2e2095bd2f7d031",
+    ...overrides
+  };
+}
+
+function hostFixture(overrides: Partial<PublicHost> = {}): PublicHost {
+  return {
+    handle: "amber-falcon",
+    region: "in-south",
+    state: "serving",
+    jobs_24h: 3,
+    credited_microdollars_24h: 4,
+    credited_microdollars_total: 4,
     ...overrides
   };
 }
