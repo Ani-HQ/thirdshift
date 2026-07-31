@@ -433,6 +433,7 @@ func (o Options) handleSession(ctx context.Context, conn *websocket.Conn, tokenN
 				return
 			}
 			if err := o.JobService.HandleNodeMessage(ctx, tokenNodeID, sessionID, envelope); err != nil {
+				o.logger().ErrorContext(ctx, "job message handling failed", "node_id", tokenNodeID, "session_id", sessionID, "message_type", envelope.Type, "error", err)
 				_ = conn.Close(websocket.StatusInternalError, "job message handling failed")
 				return
 			}

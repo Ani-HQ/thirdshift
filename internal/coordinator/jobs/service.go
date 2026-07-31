@@ -88,7 +88,7 @@ func (s *Service) AttachSession(nodeID, sessionID string, send SendFunc) func() 
 		}
 		s.mu.Unlock()
 		if active.jobID != "" {
-			apiErr := APIError{Code: CodeJobFailed, Message: "Node session disconnected before completion.", Retryable: true, Status: 502}
+			apiErr := APIError{Code: CodeJobFailed, Message: "Node session disconnected before completion.", Retryable: true, Status: 503}
 			_ = s.handleAttemptFailure(context.Background(), nodeID, active.jobID, active.attemptID, apiErr, true, s.now(), CodeJobFailed)
 		}
 	}
@@ -261,13 +261,16 @@ func (s *Service) HandleNodeMessage(ctx context.Context, nodeID, sessionID strin
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			return err
 		}
-		return s.Store.MarkAccepted(ctx, payload.JobID, payload.AttemptID, payload.AcceptedAt)
+		// The 2s accept window is enforced against the coordinator clock;
+		// node-reported timestamps are untrusted and skew-prone (a Windows
+		// host a few seconds off NTP would fail every accept).
+		return s.Store.MarkAccepted(ctx, payload.JobID, payload.AttemptID, s.now())
 	case protocol.TypeJobStarted:
 		var payload protocol.JobStartedPayload
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			return err
 		}
-		return s.Store.MarkStarted(ctx, payload.JobID, payload.AttemptID, payload.StartedAt)
+		return s.Store.MarkStarted(ctx, payload.JobID, payload.AttemptID, s.now())
 	case protocol.TypeJobRejected:
 		var payload protocol.JobRejectedPayload
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
@@ -281,7 +284,7 @@ func (s *Service) HandleNodeMessage(ctx context.Context, nodeID, sessionID strin
 				originalAttemptID = dup.originalAttemptID
 				originalNodeID = dup.originalNodeID
 			}
-			_ = s.Store.MarkVerificationAttemptFailed(ctx, payload.JobID, payload.AttemptID, payload.ReasonCode, payload.RejectedAt)
+			_ = s.Store.MarkVerificationAttemptFailed(ctx, payload.JobID, payload.AttemptID, payload.ReasonCode, s.now())
 			_ = s.Store.RecordDuplicateOutcome(ctx, DuplicateOutcome{
 				JobID:             payload.JobID,
 				AttemptID:         payload.AttemptID,
@@ -295,7 +298,7 @@ func (s *Service) HandleNodeMessage(ctx context.Context, nodeID, sessionID strin
 			return nil
 		}
 		apiErr := APIError{Code: CodeNoCapacity, Message: payload.Message, Retryable: payload.Retryable, Status: 503}
-		return s.handleAttemptFailure(ctx, nodeID, payload.JobID, payload.AttemptID, apiErr, payload.Retryable, payload.RejectedAt, payload.ReasonCode)
+		return s.handleAttemptFailure(ctx, nodeID, payload.JobID, payload.AttemptID, apiErr, payload.Retryable, s.now(), payload.ReasonCode)
 	case protocol.TypeJobFailed:
 		var payload protocol.JobFailedPayload
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
@@ -304,7 +307,7 @@ func (s *Service) HandleNodeMessage(ctx context.Context, nodeID, sessionID strin
 		if s.isDuplicateAttempt(payload.AttemptID) {
 			s.clearActive(nodeID)
 			dup := s.removeDuplicateRun(payload.AttemptID)
-			_ = s.Store.MarkVerificationAttemptFailed(ctx, payload.JobID, payload.AttemptID, payload.ErrorCode, payload.FailedAt)
+			_ = s.Store.MarkVerificationAttemptFailed(ctx, payload.JobID, payload.AttemptID, payload.ErrorCode, s.now())
 			_ = s.Store.RecordDuplicateOutcome(ctx, DuplicateOutcome{
 				JobID:             payload.JobID,
 				AttemptID:         payload.AttemptID,
@@ -317,8 +320,8 @@ func (s *Service) HandleNodeMessage(ctx context.Context, nodeID, sessionID strin
 			})
 			return nil
 		}
-		apiErr := APIError{Code: CodeJobFailed, Message: payload.Message, Retryable: payload.Retryable, Status: 502}
-		return s.handleAttemptFailure(ctx, nodeID, payload.JobID, payload.AttemptID, apiErr, payload.Retryable, payload.FailedAt, payload.ErrorCode)
+		apiErr := APIError{Code: CodeJobFailed, Message: payload.Message, Retryable: payload.Retryable, Status: 503}
+		return s.handleAttemptFailure(ctx, nodeID, payload.JobID, payload.AttemptID, apiErr, payload.Retryable, s.now(), payload.ErrorCode)
 	case protocol.TypeJobCompleted:
 		var payload protocol.JobCompletedPayload
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
@@ -329,8 +332,8 @@ func (s *Service) HandleNodeMessage(ctx context.Context, nodeID, sessionID strin
 		}
 		if err := s.verifyCompletion(ctx, nodeID, payload); err != nil {
 			s.clearActive(nodeID)
-			apiErr := APIError{Code: CodeJobFailed, Message: err.Error(), Retryable: false, Status: 502}
-			_ = s.Store.FailJob(ctx, payload.JobID, payload.AttemptID, apiErr.Code, apiErr.Message, false, false, payload.CompletedAt)
+			apiErr := APIError{Code: CodeJobFailed, Message: err.Error(), Retryable: false, Status: 503}
+			_ = s.Store.FailJob(ctx, payload.JobID, payload.AttemptID, apiErr.Code, apiErr.Message, false, false, s.now())
 			s.removeRun(payload.JobID)
 			s.notify(payload.JobID, Result{Error: apiErr})
 			return nil
@@ -346,8 +349,8 @@ func (s *Service) HandleNodeMessage(ctx context.Context, nodeID, sessionID strin
 		}
 		if acceptanceErr != nil {
 			s.clearActive(nodeID)
-			apiErr := APIError{Code: CodeJobFailed, Message: acceptanceErr.Error(), Retryable: false, Status: 502}
-			_ = s.Store.FailJob(ctx, payload.JobID, payload.AttemptID, apiErr.Code, apiErr.Message, false, false, payload.CompletedAt)
+			apiErr := APIError{Code: CodeJobFailed, Message: acceptanceErr.Error(), Retryable: false, Status: 503}
+			_ = s.Store.FailJob(ctx, payload.JobID, payload.AttemptID, apiErr.Code, apiErr.Message, false, false, s.now())
 			s.removeRun(payload.JobID)
 			s.notify(payload.JobID, Result{Error: apiErr})
 			return nil
