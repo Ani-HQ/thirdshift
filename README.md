@@ -35,7 +35,7 @@ See [docs/HANDOFF.md](docs/HANDOFF.md) for the full product and engineering spec
 Windows 11 x64 with an eligible NVIDIA GPU is the v0.1 host target.
 
 ```powershell
-irm https://github.com/Ani-HQ/thirdshift/releases/latest/download/install.ps1 | iex
+irm https://thirdshift.ani.computer/install.ps1 | iex
 thirdshift doctor
 thirdshift login --invite THIRDSHIFT-ALPHA-INVITE --coordinator https://coordinator.example
 thirdshift configure --from 23:00 --until 08:00 --max-temp 78
@@ -46,7 +46,7 @@ thirdshift status
 Uninstall keeps node data by default:
 
 ```powershell
-irm https://github.com/Ani-HQ/thirdshift/releases/latest/download/uninstall.ps1 | iex
+irm https://thirdshift.ani.computer/uninstall.ps1 | iex
 ```
 
 Use `-PurgeData` only when you also want local node credentials and model cache removed.
