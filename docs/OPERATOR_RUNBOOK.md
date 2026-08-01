@@ -327,6 +327,17 @@ curl -sS "$THIRDSHIFT_COORDINATOR_URL/v1/nodes/$NODE_ID/card" | jq .
 
 Expected result: the card shows aggregate host contribution only: node name/id, nights active, jobs accepted, tokens served, and credit earned.
 
+Model selection is automatic. `thirdshift start` probes GPU vendor, VRAM, RAM
+and free disk, then runs the largest catalog model whose hardware floor the host
+satisfies, logging the choice and the numbers behind it. Hidden-listing models
+are never auto-selected. `--model auto` asks for the same behavior explicitly;
+`--model <id>` pins one and is refused up front if the host cannot run it.
+
+On hosts where VRAM cannot be measured (AMD reports `AdapterRAM` as a truncated
+32-bit value), selection falls back to RAM and disk alone and prints a warning
+that the VRAM floor is unverified. If the runtime then runs out of memory, pin a
+smaller model with `--model`.
+
 Windows install path:
 
 ```powershell
