@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The public earnings ticker now lists a host once it has earned credit, or while it is connected, instead of every node seen in the last 24 hours — test registrations no longer linger on the page.
+
 - Auto model selection now assumes the 8GB platform floor when VRAM cannot be measured, instead of selecting on RAM alone: a high-RAM host with an unreadable GPU would otherwise be handed the largest model in the catalog.
 
 - `thirdshift start` now selects a model automatically: it measures GPU vendor, VRAM, RAM and free disk, runs the largest catalog model that fits, and logs the choice with the numbers behind it. `--model auto` requests this explicitly; `--model <id>` still pins one and is now refused up front when the hardware cannot run it. Hidden-listing models are never auto-selected.
