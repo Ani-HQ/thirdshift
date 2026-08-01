@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Ani-HQ/thirdshift/internal/node/control"
+	nodeschedule "github.com/Ani-HQ/thirdshift/internal/node/schedule"
 	nodestate "github.com/Ani-HQ/thirdshift/internal/node/state"
 	"github.com/Ani-HQ/thirdshift/internal/shared/protocol"
 	"nhooyr.io/websocket"
@@ -337,4 +339,27 @@ func (fakeTelemetry) GPUStatus(context.Context) (protocol.GPUStatus, error) {
 		PowerLimitW:        1,
 		UtilizationPercent: 1,
 	}, nil
+}
+
+func TestHeartbeatCarriesGPUVendor(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	gpu := protocol.GPUStatus{Name: "AMD Radeon RX 7900 XTX", VRAMTotalMB: 24564, VRAMFreeMB: 24000}
+
+	amd := buildHeartbeat("node_01J0M000000000000000000001", 7, nodestate.Available, RuntimeStatus{}, gpu,
+		"amd", nil, nodeschedule.StateInWindow, "normal", false, false, 42, now)
+	if amd.GPUVendor != "amd" {
+		t.Fatalf("gpu_vendor = %q, want amd", amd.GPUVendor)
+	}
+
+	// The field is omitempty, so a node that cannot identify its vendor sends
+	// no key at all rather than an empty string.
+	unknown := buildHeartbeat("node_01J0M000000000000000000001", 8, nodestate.Available, RuntimeStatus{}, gpu,
+		"", nil, nodeschedule.StateInWindow, "normal", false, false, 42, now)
+	encoded, err := json.Marshal(unknown)
+	if err != nil {
+		t.Fatalf("marshal heartbeat: %v", err)
+	}
+	if strings.Contains(string(encoded), "gpu_vendor") {
+		t.Fatalf("empty vendor should be omitted: %s", encoded)
+	}
 }

@@ -51,9 +51,10 @@ func RunDoctor(ctx context.Context, opts DoctorOptions) DoctorReport {
 	}
 
 	report.Checks = append(report.Checks, checkPlatform())
-	gpus, nvidiaChecks := checkNvidia(ctx, opts)
+	gpus, vendor, gpuChecks := checkGPU(ctx, opts)
 	report.GPUs = gpus
-	report.Checks = append(report.Checks, nvidiaChecks...)
+	report.GPUVendor = vendor
+	report.Checks = append(report.Checks, gpuChecks...)
 	report.Checks = append(report.Checks, checkRAM())
 	report.Checks = append(report.Checks, checkDisk(opts.DiskPath))
 	report.Checks = append(report.Checks, checkHTTPS(ctx, opts.HTTPSURL, opts.Timeout))
@@ -75,8 +76,81 @@ func checkPlatform() CheckResult {
 		Name:        "platform",
 		Status:      StatusUnsupported,
 		Message:     fmt.Sprintf("%s/%s is not a supported host platform for v0.1.", runtime.GOOS, runtime.GOARCH),
-		Remediation: "Run the host node on Windows 11 x64 with an NVIDIA GPU. macOS can still run local fake and CPU demo paths.",
+		Remediation: "Run the host node on Windows 11 x64 with an NVIDIA or AMD GPU. macOS can still run local fake and CPU demo paths.",
 	}
+}
+
+// checkGPU resolves the host GPU. NVIDIA is attempted first and its result
+// path is unchanged; AMD is only consulted when nvidia-smi does not answer, so
+// an NVIDIA host produces byte-identical output to before AMD support existed.
+func checkGPU(ctx context.Context, opts DoctorOptions) ([]GPU, string, []CheckResult) {
+	gpus, checks := checkNvidia(ctx, opts)
+	if len(gpus) > 0 {
+		return gpus, VendorNvidia, checks
+	}
+	if runtime.GOOS != "windows" {
+		return gpus, VendorUnknown, checks
+	}
+	amdGPUs, amdChecks, ok := checkAMD(ctx, opts)
+	if !ok {
+		return gpus, VendorUnknown, checks
+	}
+	return amdGPUs, VendorAMD, amdChecks
+}
+
+// checkAMD reports whether an AMD adapter was found, and the checks to use in
+// place of the NVIDIA failure pair when one was.
+func checkAMD(ctx context.Context, opts DoctorOptions) ([]GPU, []CheckResult, bool) {
+	controllers, err := DetectWindowsVideoControllers(ctx, opts.Runner)
+	if err != nil {
+		return nil, nil, false
+	}
+	primary, vendor := SelectPrimaryController(controllers)
+	if vendor != VendorAMD {
+		return nil, nil, false
+	}
+
+	gpus := GPUsFromControllers(controllers)
+	gpuCheck := CheckResult{
+		Name:    "gpu",
+		Status:  StatusPass,
+		Message: fmt.Sprintf("AMD GPU detected (%s); llama.cpp will use the Vulkan backend.", strings.TrimSpace(primary.Name)),
+		Details: map[string]any{
+			"vendor":         VendorAMD,
+			"backend":        "vulkan",
+			"driver_version": strings.TrimSpace(primary.DriverVersion),
+		},
+	}
+
+	// AdapterRAM is a 32-bit field, so it cannot be trusted above 4 GB. Say so
+	// rather than inventing a number that could wrongly pass or fail the floor.
+	vramBytes, known := AdapterVRAMBytes(primary)
+	vram := CheckResult{
+		Name:   "vram",
+		Status: StatusWarn,
+		Message: "AMD VRAM could not be established reliably: Windows reports AdapterRAM as a 32-bit value, " +
+			"so cards above 4 GB are truncated.",
+		Remediation: "Confirm the card has at least 8 GB VRAM. Reported capacity is verified from the Vulkan device report when the runtime starts.",
+		Details: map[string]any{
+			"vendor":     VendorAMD,
+			"minimum_gb": bytesToGiB(MinimumVRAMBytes),
+			"source":     "win32_videocontroller",
+		},
+	}
+	if known {
+		vram.Details["reported_gb"] = bytesToGiB(uint64(vramBytes))
+		if uint64(vramBytes) >= MinimumVRAMBytes {
+			vram.Status = StatusPass
+			vram.Message = fmt.Sprintf("AMD GPU reports %.1f GB VRAM.", bytesToGiB(uint64(vramBytes)))
+			vram.Remediation = ""
+		} else {
+			vram.Message = fmt.Sprintf(
+				"AMD GPU reports %.1f GB VRAM, below the 8 GB floor, but AdapterRAM truncates above 4 GB so this may understate the card.",
+				bytesToGiB(uint64(vramBytes)))
+		}
+	}
+
+	return gpus, []CheckResult{gpuCheck, vram}, true
 }
 
 func checkNvidia(ctx context.Context, opts DoctorOptions) ([]GPU, []CheckResult) {

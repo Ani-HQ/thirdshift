@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added AMD Radeon host support on Windows via llama.cpp's Vulkan backend: runtime release manifests gain optional per-backend artifact keys (`windows/amd64/cuda`, `windows/amd64/vulkan`) with the bare platform key as a fallback, and the node picks its build from the detected GPU vendor.
+- Added GPU vendor detection to `thirdshift doctor` (nvidia, amd, unknown) using `Win32_VideoController` via PowerShell on Windows; AMD hosts pass with a note that Vulkan is used. AMD VRAM is reported as unknown when `AdapterRAM` lands in the 32-bit wrap band rather than being estimated.
+- Added an optional `gpu_vendor` field to the `node.heartbeat` payload and schema.
+
 - Added Qwen2.5 14B and 32B Instruct manifests (Apache-2.0, pinned Q4_K_M GGUFs) so 12GB and 24GB hosts can serve models that command materially higher prices per token than the 7B tier.
 
 - Fixed the pinned Windows runtime having no GPU backend: llama.cpp b10180 shipped only a CPU build for Windows, so nodes served every token on CPU (7.4 tok/s measured on an RTX 3060 Ti) while `--n-gpu-layers` was silently ignored. Runtime re-pinned to b10182 with the real CUDA 12.4 build, and `gpu_layers` is now an explicit full-offload layer count.
