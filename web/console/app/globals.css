@@ -312,14 +312,17 @@ body:has(.public-page) {
 }
 
 .public-page button {
-  min-height: 36px;
-  padding: 0 14px;
-  border-radius: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 4px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--pub-text);
   font: inherit;
-  font-size: 15px;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -343,9 +346,11 @@ body:has(.public-page) {
 }
 
 .public-page button.quiet {
-  padding: 0 6px;
+  min-height: 24px;
+  padding: 0 4px;
   color: var(--pub-secondary);
-  font-size: 14px;
+  font-size: 12.5px;
+  font-weight: 400;
 }
 
 .public-page button.quiet:hover {
@@ -611,7 +616,7 @@ body:has(.public-page) {
   align-content: center;
   /* Close to a settled row so the first paint does not lurch when the real
      catalog replaces the placeholders. */
-  min-height: 148px;
+  min-height: 112px;
   gap: 10px;
 }
 
@@ -619,20 +624,76 @@ body:has(.public-page) {
   font-size: 17px;
 }
 
-.model-identity p {
+.model-identity > p {
   margin-top: 6px;
   color: var(--pub-secondary);
   font-size: 15px;
 }
 
-.model-identity .model-meta {
+.model-identity .model-context {
   margin-top: 8px;
-  font-size: 13px;
+  color: var(--pub-secondary);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-specs {
+  margin-top: 8px;
+}
+
+.model-specs > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--pub-secondary);
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.model-specs > summary::-webkit-details-marker {
+  display: none;
+}
+
+.model-specs > summary::after {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-top: 4.5px solid currentColor;
+  opacity: 0.7;
+  transition: transform 120ms ease;
+}
+
+.model-specs[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.model-specs > summary:hover {
+  color: var(--pub-text);
+}
+
+.model-specs-body {
+  margin-top: 8px;
+}
+
+.model-identity .model-meta {
+  margin-top: 0;
+  color: var(--pub-secondary);
+  font-size: 12.5px;
   overflow-wrap: anywhere;
 }
 
+.model-identity .model-meta + .model-meta,
+.model-identity .model-meta + .model-attribution {
+  margin-top: 4px;
+}
+
 .model-identity .model-attribution {
-  margin-top: 6px;
+  margin-top: 0;
   font-size: 12px;
   color: var(--pub-secondary);
 }
@@ -653,23 +714,16 @@ body:has(.public-page) {
   font-size: 13px;
 }
 
-.model-price .price-comparison {
-  margin-top: 10px;
-  color: var(--pub-secondary);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-
 .cheaper {
   /* Its own line, so the tag sits consistently across rows instead of
      wrapping only for the longer price strings. */
   display: table;
-  margin-top: 6px;
-  padding: 1px 7px;
+  margin-top: 8px;
+  padding: 1px 6px;
   border: 1px solid var(--pub-hairline);
   border-radius: 999px;
   background: var(--pub-bg-alt);
-  font-size: 12px;
+  font-size: 11.5px;
   white-space: nowrap;
 }
 
@@ -677,24 +731,24 @@ body:has(.public-page) {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 5px;
 }
 
 .model-state .availability {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .model-state .speed {
   color: var(--pub-secondary);
-  font-size: 13px;
+  font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
 
 .model-state button {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .dot {
