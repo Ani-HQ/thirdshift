@@ -19,6 +19,7 @@ import (
 	"github.com/Ani-HQ/thirdshift/internal/node/control"
 	"github.com/Ani-HQ/thirdshift/internal/node/identity"
 	"github.com/Ani-HQ/thirdshift/internal/node/models"
+	noderegistration "github.com/Ani-HQ/thirdshift/internal/node/registration"
 	noderuntime "github.com/Ani-HQ/thirdshift/internal/node/runtime"
 	nodeschedule "github.com/Ani-HQ/thirdshift/internal/node/schedule"
 	"github.com/Ani-HQ/thirdshift/internal/node/session"
@@ -73,26 +74,27 @@ type Options struct {
 }
 
 type Agent struct {
-	opts            Options
-	mu              sync.Mutex
-	state           nodestate.State
-	runtimeStatus   RuntimeStatus
-	gpu             protocol.GPUStatus
-	scheduleWindow  nodeschedule.Window
-	scheduleState   string
-	thermalState    string
-	sessionID       string
-	connected       bool
-	sequence        int64
-	activeJobID     *string
-	activeJobCancel context.CancelFunc
-	pauseRequested  bool
-	pausedAt        *time.Time
-	lastSentState   nodestate.State
-	lastHeartbeatAt *time.Time
-	lastError       string
-	startedAt       time.Time
-	writeMu         sync.Mutex
+	opts                 Options
+	accessTokenExpiresAt time.Time
+	mu                   sync.Mutex
+	state                nodestate.State
+	runtimeStatus        RuntimeStatus
+	gpu                  protocol.GPUStatus
+	scheduleWindow       nodeschedule.Window
+	scheduleState        string
+	thermalState         string
+	sessionID            string
+	connected            bool
+	sequence             int64
+	activeJobID          *string
+	activeJobCancel      context.CancelFunc
+	pauseRequested       bool
+	pausedAt             *time.Time
+	lastSentState        nodestate.State
+	lastHeartbeatAt      *time.Time
+	lastError            string
+	startedAt            time.Time
+	writeMu              sync.Mutex
 }
 
 func Run(ctx context.Context, opts Options) error {
@@ -136,6 +138,7 @@ func New(opts Options) (*Agent, error) {
 	if opts.Output == nil {
 		opts.Output = io.Discard
 	}
+	var storedTokenExpiry time.Time
 	if opts.NodeID == "" || opts.AccessToken == "" || opts.CoordinatorURL == "" {
 		creds, err := identity.LoadCredentials(opts.DataDir)
 		if err != nil {
@@ -147,6 +150,7 @@ func New(opts Options) (*Agent, error) {
 		if opts.AccessToken == "" {
 			opts.AccessToken = creds.AccessToken
 		}
+		storedTokenExpiry = creds.AccessTokenExpiresAt
 		if opts.CoordinatorURL == "" {
 			opts.CoordinatorURL = creds.CoordinatorURL
 		}
@@ -216,12 +220,13 @@ func New(opts Options) (*Agent, error) {
 		return nil, err
 	}
 	return &Agent{
-		opts:           opts,
-		state:          nodestate.Offline,
-		scheduleWindow: window,
-		scheduleState:  nodeschedule.StateInWindow,
-		thermalState:   "normal",
-		startedAt:      opts.now(),
+		opts:                 opts,
+		accessTokenExpiresAt: storedTokenExpiry,
+		state:                nodestate.Offline,
+		scheduleWindow:       window,
+		scheduleState:        nodeschedule.StateInWindow,
+		thermalState:         "normal",
+		startedAt:            opts.now(),
 	}, nil
 }
 
@@ -287,19 +292,77 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
+// accessTokenRefreshBuffer is how long before expiry the agent renews. Access
+// tokens live an hour; a node that only refreshed at startup would reconnect
+// with a dead token after any drop past that hour and be rejected forever.
+const accessTokenRefreshBuffer = 10 * time.Minute
+
+// ensureAccessToken renews the access token when it is missing or close to
+// expiring. The node signs the renewal with its own key, so this works
+// unattended for as long as the process runs.
+func (a *Agent) ensureAccessToken(ctx context.Context, force bool) error {
+	if a.opts.PrivateKey == nil || a.opts.NodeID == "" {
+		return nil
+	}
+	if !force {
+		// A token we hold with no known expiry is used as-is; a 401 on dial
+		// forces the refresh instead. Refreshing blindly would hit the
+		// coordinator on every reconnect.
+		if a.opts.AccessToken != "" && a.accessTokenExpiresAt.IsZero() {
+			return nil
+		}
+		if !a.accessTokenExpiresAt.IsZero() && a.opts.now().Add(accessTokenRefreshBuffer).Before(a.accessTokenExpiresAt) {
+			return nil
+		}
+	}
+	token, expiresAt, err := noderegistration.RefreshAccessToken(ctx, noderegistration.RefreshOptions{
+		CoordinatorURL: a.opts.CoordinatorURL,
+		NodeID:         a.opts.NodeID,
+		PrivateKey:     a.opts.PrivateKey,
+		DataDir:        a.opts.DataDir,
+		HTTPClient:     a.opts.HTTPClient,
+		Now:            a.opts.now,
+	})
+	if err != nil {
+		return fmt.Errorf("refresh access token: %w", err)
+	}
+	a.opts.AccessToken = token
+	a.accessTokenExpiresAt = expiresAt
+	return nil
+}
+
+func (a *Agent) dialSession(ctx context.Context, endpoint string) (*websocket.Conn, *http.Response, error) {
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+a.opts.AccessToken)
+	return websocket.Dial(ctx, endpoint, &websocket.DialOptions{
+		HTTPClient: a.opts.HTTPClient,
+		HTTPHeader: header,
+	})
+}
+
 func (a *Agent) runSession(ctx context.Context) error {
 	endpoint, err := sessionURL(a.opts.CoordinatorURL)
 	if err != nil {
 		return err
 	}
-	header := http.Header{}
-	header.Set("Authorization", "Bearer "+a.opts.AccessToken)
-	conn, _, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{
-		HTTPClient: a.opts.HTTPClient,
-		HTTPHeader: header,
-	})
+	if err := a.ensureAccessToken(ctx, false); err != nil {
+		return err
+	}
+	conn, resp, err := a.dialSession(ctx, endpoint)
 	if err != nil {
-		return fmt.Errorf("connect websocket: %w", err)
+		// An expired token reads as 401 here. Renew once and retry, so a node
+		// that has been running longer than the token lifetime recovers from a
+		// disconnect on its own instead of needing a manual restart.
+		if resp != nil && resp.StatusCode == http.StatusUnauthorized {
+			if refreshErr := a.ensureAccessToken(ctx, true); refreshErr != nil {
+				return fmt.Errorf("connect websocket: %w (token refresh also failed: %v)", err, refreshErr)
+			}
+			fmt.Fprintln(a.opts.Output, "access token expired; renewed and reconnecting")
+			conn, _, err = a.dialSession(ctx, endpoint)
+		}
+		if err != nil {
+			return fmt.Errorf("connect websocket: %w", err)
+		}
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 

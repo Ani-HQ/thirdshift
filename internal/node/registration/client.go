@@ -190,3 +190,40 @@ func (o LoginOptions) now() time.Time {
 	}
 	return time.Now().UTC()
 }
+
+// RefreshOptions carries what a long-running agent needs to renew its own
+// access token without going through the full login path.
+type RefreshOptions struct {
+	CoordinatorURL string
+	NodeID         string
+	PrivateKey     ed25519.PrivateKey
+	DataDir        string
+	HTTPClient     *http.Client
+	Now            func() time.Time
+}
+
+// RefreshAccessToken renews the node's access token and persists it, so a
+// process that has been running for days reconnects with a live token rather
+// than the one it was handed at startup.
+func RefreshAccessToken(ctx context.Context, opts RefreshOptions) (string, time.Time, error) {
+	client := opts.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	now := time.Now
+	if opts.Now != nil {
+		now = opts.Now
+	}
+	refreshed, err := refresh(ctx, client, opts.CoordinatorURL, opts.PrivateKey, opts.NodeID, now())
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if opts.DataDir != "" {
+		if creds, err := identity.LoadCredentials(opts.DataDir); err == nil {
+			creds.AccessToken = refreshed.AccessToken
+			creds.AccessTokenExpiresAt = refreshed.AccessTokenExpiresAt
+			_ = identity.SaveCredentials(opts.DataDir, creds)
+		}
+	}
+	return refreshed.AccessToken, refreshed.AccessTokenExpiresAt, nil
+}
