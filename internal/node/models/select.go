@@ -1,11 +1,14 @@
 package models
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
+
+	catalogfs "github.com/Ani-HQ/thirdshift/models/catalog"
 )
 
 // AutoModelID is the explicit way to ask for hardware-based selection. An empty
@@ -40,20 +43,23 @@ type Selection struct {
 	VRAMAssumed bool
 }
 
-// LoadSelectableManifests reads every manifest in the catalog directory that
-// parses and is not hidden. Unparseable manifests (placeholders) are skipped,
-// matching catalog sync behavior.
+// LoadSelectableManifests lists every manifest that parses and is not hidden.
+// Names come from the catalog directory when it exists and from the embedded
+// catalog otherwise, because a released binary runs from an arbitrary working
+// directory with no repo checkout — the same reason ReadCatalogFile falls back.
+// Unparseable manifests (placeholders) are skipped, matching catalog sync.
 func LoadSelectableManifests(catalogDir string) ([]Manifest, error) {
-	entries, err := os.ReadDir(catalogDir)
+	names, err := catalogManifestNames(catalogDir)
 	if err != nil {
-		return nil, fmt.Errorf("read catalog dir: %w", err)
+		return nil, err
 	}
 	var manifests []Manifest
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+	for _, name := range names {
+		data, _, err := ReadCatalogFile(catalogDir, name)
+		if err != nil {
 			continue
 		}
-		manifest, err := ParseManifestFile(filepath.Join(catalogDir, entry.Name()))
+		manifest, err := parseManifest(fileScanner{Scanner: bufio.NewScanner(bytes.NewReader(data))})
 		if err != nil {
 			continue
 		}
@@ -63,6 +69,35 @@ func LoadSelectableManifests(catalogDir string) ([]Manifest, error) {
 		manifests = append(manifests, manifest)
 	}
 	return manifests, nil
+}
+
+// catalogManifestNames prefers the on-disk catalog so an operator can override
+// or extend it, and falls back to the catalog compiled into the binary.
+func catalogManifestNames(catalogDir string) ([]string, error) {
+	var names []string
+	if entries, err := os.ReadDir(catalogDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".yaml") {
+				names = append(names, entry.Name())
+			}
+		}
+	}
+	if len(names) > 0 {
+		return names, nil
+	}
+	entries, err := catalogfs.FS.ReadDir(".")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded catalog: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".yaml") {
+			names = append(names, entry.Name())
+		}
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("no model manifests found on disk (%s) or in the embedded catalog", catalogDir)
+	}
+	return names, nil
 }
 
 // bySizeDescending orders candidates largest first. min_vram_mb is the size
