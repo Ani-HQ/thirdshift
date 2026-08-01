@@ -271,35 +271,44 @@ function ModelRow({
       <div className="model-identity">
         <h3>{model.display_name}</h3>
         <p>{model.description}</p>
-        <p className="model-meta">
-          {model.model_id} · {model.limits.context_tokens.toLocaleString()} context ·{" "}
-          {model.limits.max_output_tokens.toLocaleString()} max output
-        </p>
-        {model.attribution ? (
-          <p className="model-attribution">
-            {model.attribution.display_text}
-            {model.attribution.notice_text ? (
-              <>
-                {" · "}
-                {model.attribution.license_url ? (
-                  <a href={model.attribution.license_url} target="_blank" rel="noreferrer">
-                    {model.attribution.notice_text}
-                  </a>
-                ) : (
-                  model.attribution.notice_text
-                )}
-              </>
+        <p className="model-context">{model.limits.context_tokens.toLocaleString()} context</p>
+        <details className="model-specs">
+          <summary>Tech specs</summary>
+          <div className="model-specs-body">
+            <p className="model-meta">
+              {model.model_id} · {model.limits.max_output_tokens.toLocaleString()} max output
+            </p>
+            {waitlisted ? null : <p className="model-meta">{nodeLabel(model)}</p>}
+            {model.market_comparison ? (
+              <p className="model-meta">{formatComparisonLine(model.market_comparison)}</p>
             ) : null}
-            {model.attribution.aup_url ? (
-              <>
-                {" · "}
-                <a href={model.attribution.aup_url} target="_blank" rel="noreferrer">
-                  Acceptable Use Policy
-                </a>
-              </>
+            {model.attribution ? (
+              <p className="model-attribution">
+                {model.attribution.display_text}
+                {model.attribution.notice_text ? (
+                  <>
+                    {" · "}
+                    {model.attribution.license_url ? (
+                      <a href={model.attribution.license_url} target="_blank" rel="noreferrer">
+                        {model.attribution.notice_text}
+                      </a>
+                    ) : (
+                      model.attribution.notice_text
+                    )}
+                  </>
+                ) : null}
+                {model.attribution.aup_url ? (
+                  <>
+                    {" · "}
+                    <a href={model.attribution.aup_url} target="_blank" rel="noreferrer">
+                      Acceptable Use Policy
+                    </a>
+                  </>
+                ) : null}
+              </p>
             ) : null}
-          </p>
-        ) : null}
+          </div>
+        </details>
       </div>
       <div className="model-price">
         <p className="price-primary">
@@ -307,12 +316,7 @@ function ModelRow({
           {formatPricePerMillion(model.price.output_per_million_microdollars)} out
         </p>
         <p className="price-unit">per 1M tokens</p>
-        {model.market_comparison ? (
-          <p className="price-comparison">
-            {formatComparisonLine(model.market_comparison)}
-            {discount ? <span className="cheaper">~{discount}% cheaper</span> : null}
-          </p>
-        ) : null}
+        {discount ? <span className="cheaper">~{discount}% cheaper</span> : null}
       </div>
       <div className="model-state">
         <p className="availability">
@@ -320,7 +324,6 @@ function ModelRow({
           {availabilityLabel(model)}
         </p>
         <p className="speed">{speedLabel(model)}</p>
-        {waitlisted ? null : <p className="speed">{nodeLabel(model)}</p>}
         <button type="button" className={waitlisted ? "outline" : "solid"} onClick={onRequest}>
           Request access
         </button>
