@@ -19,9 +19,9 @@ license:
   notes: Apache-2.0 license reported by the pinned Hugging Face model card metadata; GGUF file hash verified from download.
 runtime:
   engine: llama.cpp
-  build_id: llama-cpp-b10180
-  release_manifest: llama-cpp-b10180.runtime.json
-  binary_sha256: 789f717355fb2574becfaa70601714c78908bd1e5d6c6cadd6b8ccc98060d0f7
+  build_id: llama-cpp-b10182
+  release_manifest: llama-cpp-b10182.runtime.json
+  binary_sha256: d17e65c8056573dada3b7dfaf675e95953a7b29e7f004489dd1bf434edb72394
   arguments:
     context_size: 2048
     batch_size: 128

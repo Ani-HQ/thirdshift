@@ -24,13 +24,13 @@ license:
   notes: Apache-2.0 reported by the pinned Hugging Face model card metadata; sha256 and size read from the Git LFS pointer at the pinned revision and cross-checked against the resolve endpoint x-linked-etag and x-linked-size headers.
 runtime:
   engine: llama.cpp
-  build_id: llama-cpp-b10180
-  release_manifest: llama-cpp-b10180.runtime.json
-  binary_sha256: 789f717355fb2574becfaa70601714c78908bd1e5d6c6cadd6b8ccc98060d0f7
+  build_id: llama-cpp-b10182
+  release_manifest: llama-cpp-b10182.runtime.json
+  binary_sha256: d17e65c8056573dada3b7dfaf675e95953a7b29e7f004489dd1bf434edb72394
   arguments:
     context_size: 8192
     batch_size: 512
-    gpu_layers: auto
+    gpu_layers: "999"
     parallel: 1
     host: 127.0.0.1
     port: dynamic

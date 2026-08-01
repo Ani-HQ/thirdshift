@@ -89,7 +89,7 @@ func TestRuntimeManagerRollback(t *testing.T) {
 }
 
 func TestPinnedRuntimeManifestVerifies(t *testing.T) {
-	manifest, err := LoadReleaseManifest("../../../models/catalog/llama-cpp-b10180.runtime.json")
+	manifest, err := LoadReleaseManifest("../../../models/catalog/llama-cpp-b10182.runtime.json")
 	if err != nil {
 		t.Fatalf("load pinned runtime manifest: %v", err)
 	}
