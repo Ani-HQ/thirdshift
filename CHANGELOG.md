@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed `thirdshift start` with no `--model` failing on installed binaries: automatic selection listed the catalog directory from disk instead of falling back to the catalog embedded in the binary.
+
 - Fixed nodes going permanently offline about an hour after starting: access tokens were fetched once at startup and never renewed, so any reconnect past the token lifetime was rejected with 401 until the process was restarted by hand. The agent now renews proactively near expiry and retries once on a 401.
 
 - The public earnings ticker now lists a host once it has earned credit, or while it is connected, instead of every node seen in the last 24 hours — test registrations no longer linger on the page.
