@@ -1,0 +1,65 @@
+schema_version: 1
+model_id: qwen2.5-32b-instruct
+display_name: Qwen2.5 32B Instruct
+status: alpha
+listing:
+  status: waitlist
+  description: Strong reasoning and long-form writing, our largest model.
+  expected_output_tokens_per_second: 18
+  market_comparison:
+    typical_input_per_million_usd: 0.2
+    typical_output_per_million_usd: 0.6
+    source_note: typical hosted price, July 2026
+source:
+  provider: huggingface
+  repository: bartowski/Qwen2.5-32B-Instruct-GGUF
+  revision: 2116cbb385b8ce3a4d28cf3bf1cd2039a55821a6
+  file: Qwen2.5-32B-Instruct-Q4_K_M.gguf
+  url: https://huggingface.co/bartowski/Qwen2.5-32B-Instruct-GGUF/resolve/2116cbb385b8ce3a4d28cf3bf1cd2039a55821a6/Qwen2.5-32B-Instruct-Q4_K_M.gguf
+  sha256: 2e5f6daea180dbc59f65a40641e94d3973b5dbaa32b3c0acf54647fa874e519e
+  size_bytes: 19851336576
+license:
+  identifier: apache-2.0
+  reviewed_at: 2026-07-30
+  notes: Apache-2.0 reported by the pinned Hugging Face model card metadata; sha256 and size read from the Git LFS pointer at the pinned revision and cross-checked against the resolve endpoint x-linked-etag and x-linked-size headers.
+runtime:
+  engine: llama.cpp
+  build_id: llama-cpp-b10182
+  release_manifest: llama-cpp-b10182.runtime.json
+  binary_sha256: d17e65c8056573dada3b7dfaf675e95953a7b29e7f004489dd1bf434edb72394
+  arguments:
+    context_size: 8192
+    batch_size: 512
+    gpu_layers: "999"
+    parallel: 1
+    host: 127.0.0.1
+    port: dynamic
+hardware:
+  min_vram_mb: 23552
+  min_ram_mb: 30720
+  min_disk_mb: 26000
+  eligible_gpu_classes:
+    - ts-nvidia-8gb-v1
+    - ts-nvidia-12gb-v1
+limits:
+  max_input_tokens: 7168
+  max_output_tokens: 1024
+  max_request_bytes: 262144
+capabilities:
+  chat_completions: true
+  streaming: false
+  tools: false
+  embeddings: false
+policy:
+  data_class: public_or_non_sensitive
+  content_filter_profile: alpha-default
+pricing:
+  customer_input_per_million_usd: 0.15
+  customer_output_per_million_usd: 0.45
+  host_credit_per_million_accepted_output_usd: 0.04
+verification:
+  duplicate_sample_rate: 0.02
+  challenge_rate: 0.01
+signature:
+  key_id: catalog-key-2026-01
+  value: TODO-CATALOG-SIGNATURE
