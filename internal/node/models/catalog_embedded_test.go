@@ -10,7 +10,7 @@ func TestCatalogFallsBackToEmbeddedWhenDiskMissing(t *testing.T) {
 	if manifest.ModelID != "qwen2.5-7b-instruct" || source != "embedded:qwen2.5-7b-instruct.yaml" {
 		t.Fatalf("manifest=%s source=%s", manifest.ModelID, source)
 	}
-	if _, source, err = ReadCatalogFile(t.TempDir(), "llama-cpp-b10180.runtime.json"); err != nil || source != "embedded:llama-cpp-b10180.runtime.json" {
+	if _, source, err = ReadCatalogFile(t.TempDir(), "llama-cpp-b10182.runtime.json"); err != nil || source != "embedded:llama-cpp-b10182.runtime.json" {
 		t.Fatalf("runtime manifest fallback: source=%s err=%v", source, err)
 	}
 }

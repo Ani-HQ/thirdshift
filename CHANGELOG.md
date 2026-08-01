@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed the pinned Windows runtime having no GPU backend: llama.cpp b10180 shipped only a CPU build for Windows, so nodes served every token on CPU (7.4 tok/s measured on an RTX 3060 Ti) while `--n-gpu-layers` was silently ignored. Runtime re-pinned to b10182 with the real CUDA 12.4 build, and `gpu_layers` is now an explicit full-offload layer count.
+
 - Added a live host earnings ticker to the public catalog: `/v1/status` now carries a `hosts` array of anonymous adjective-animal handles with region, state, 24h jobs, and 24h/lifetime host credit, summed from `host_credit_holds`. No node id, hostname, GPU, or fleet ever appears.
 - Added `region_node_counts` to `/v1/status` and a full-bleed dot-matrix world map as the opening visual above the wordmark, drawn from a committed Natural Earth land mask with per-region heat, a subtle breathe animation, and native hover tooltips.
 
