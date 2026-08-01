@@ -4,14 +4,15 @@
 
 [![Build](https://img.shields.io/badge/build-alpha-lightgrey)](#development) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![Security](https://img.shields.io/badge/security-non--sensitive%20workloads-orange)](SECURITY.md)
 
-Thirdshift runs approved open models on your NVIDIA gaming PC during your idle hours, completes useful AI jobs, and credits you for accepted work.
+Thirdshift runs approved open models on your NVIDIA or AMD gaming PC during your idle hours, completes useful AI jobs, and credits you for accepted work.
 
-One install. No exposed ports. Stops the moment you need your PC.
+One install. No exposed ports. No questions about your hardware: the node detects your GPU and picks the largest model it can run. Stops the moment you need your PC.
 
 ```text
 thirdshift start
-RTX 4070 detected
-Model ready: thirdshift-small-chat
+RTX 4070 detected, 12282MB VRAM
+selected qwen2.5-14b-instruct: 12282MB VRAM available, needs 11264MB
+Model ready
 Available until 08:00
 Connected to the network
 Job accepted: 2,184 output tokens
@@ -42,6 +43,12 @@ thirdshift configure --from 23:00 --until 08:00 --max-temp 78
 thirdshift start
 thirdshift status
 ```
+
+`thirdshift start` needs no model flag. It measures VRAM, RAM and free disk, then
+runs the largest catalog model that fits, printing which one it chose and why.
+Pass `--model auto` to ask for that explicitly, or `--model <id>` to pin one; a
+pinned model that does not fit the hardware is refused up front rather than
+failing later under load.
 
 Uninstall keeps node data by default:
 

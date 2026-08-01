@@ -12,6 +12,10 @@ import (
 // model id means the same thing.
 const AutoModelID = "auto"
 
+// VRAMUnmeasured marks a host whose VRAM could not be established. It is
+// distinct from zero so "no measurement" never reads as "no memory".
+const VRAMUnmeasured int64 = -1
+
 // HostCapacity is the measured host, in megabytes. VRAMTotalMB of zero or less
 // means VRAM could not be established; selection then falls back to RAM alone
 // and says so, rather than assuming a size.

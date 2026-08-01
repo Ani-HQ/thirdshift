@@ -30,7 +30,7 @@ func TestSelectModelPicksLargestTierThatFits(t *testing.T) {
 		vramMB int64
 		want   string
 	}{
-		"8GB picks a 7B":   {8192, "qwen2.5-7b-instruct"},
+		"8GB picks a 7B":     {8192, "qwen2.5-7b-instruct"},
 		"12GB picks the 14B": {12288, "qwen2.5-14b-instruct"},
 		"16GB still 14B":     {16384, "qwen2.5-14b-instruct"},
 		"24GB picks the 32B": {24576, "qwen2.5-32b-instruct"},

@@ -20,6 +20,7 @@ import (
 	"github.com/Ani-HQ/thirdshift/internal/node/hardware"
 	"github.com/Ani-HQ/thirdshift/internal/node/identity"
 	"github.com/Ani-HQ/thirdshift/internal/node/local"
+	nodemodels "github.com/Ani-HQ/thirdshift/internal/node/models"
 	noderegistration "github.com/Ani-HQ/thirdshift/internal/node/registration"
 	noderuntime "github.com/Ani-HQ/thirdshift/internal/node/runtime"
 	nodeschedule "github.com/Ani-HQ/thirdshift/internal/node/schedule"
@@ -154,7 +155,7 @@ func runStart(args []string) error {
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
 	dataDir := fs.String("data-dir", os.Getenv("THIRDSHIFT_NODE_DATA_DIR"), "node data directory")
 	coordinatorURL := fs.String("coordinator", os.Getenv("THIRDSHIFT_COORDINATOR_URL"), "coordinator base URL override")
-	modelID := fs.String("model", os.Getenv("THIRDSHIFT_MODEL_ID"), "model id")
+	modelID := fs.String("model", os.Getenv("THIRDSHIFT_MODEL_ID"), "model id, or \"auto\" to pick the largest model this hardware can run")
 	catalogDir := fs.String("catalog-dir", "models/catalog", "model catalog directory")
 	runtimeBaseURL := fs.String("runtime-base-url", os.Getenv("THIRDSHIFT_RUNTIME_BASE_URL"), "development-only existing loopback llama-compatible runtime URL")
 	heartbeatInterval := fs.Duration("heartbeat-interval", 15*time.Second, "heartbeat interval")
@@ -174,9 +175,6 @@ func runStart(args []string) error {
 	if *modelID != "" {
 		cfg.ModelID = *modelID
 	}
-	if err := nodeconfig.Save(cfg); err != nil {
-		return err
-	}
 	login, err := noderegistration.Login(ctx, noderegistration.LoginOptions{
 		DataDir:        cfg.DataDir,
 		CoordinatorURL: cfg.CoordinatorURL,
@@ -188,18 +186,47 @@ func runStart(args []string) error {
 	if *runtimeBaseURL != "" {
 		runtimeProvider = nodeagent.ExistingRuntimeProvider{CatalogDir: *catalogDir, BaseURL: *runtimeBaseURL}
 	}
-	// Vendor decides which runtime build the node installs and is reported on
-	// every heartbeat. Detection is best effort: unknown falls back to the bare
-	// platform artifact, which is the pre-Vulkan behavior.
-	vendorCtx, cancelVendor := context.WithTimeout(ctx, 10*time.Second)
-	gpuVendor := hardware.DetectGPUVendor(vendorCtx, nil, goruntime.GOOS)
-	cancelVendor()
-	fmt.Fprintf(os.Stdout, "starting node %s (gpu vendor: %s)\n", login.Credentials.NodeID, gpuVendor)
+	// One hardware probe answers both questions: which runtime build to install
+	// and which model tier this machine can actually run.
+	probeCtx, cancelProbe := context.WithTimeout(ctx, 20*time.Second)
+	resources, resourceErr := hardware.DetectHostResources(probeCtx, nil, cfg.DataDir, goruntime.GOOS)
+	cancelProbe()
+	if resourceErr != nil {
+		return fmt.Errorf("detect host resources: %w", resourceErr)
+	}
+	gpuVendor := resources.GPUVendor
+
+	manifests, err := nodemodels.LoadSelectableManifests(*catalogDir)
+	if err != nil {
+		return err
+	}
+	selection, err := nodemodels.ResolveModel(cfg.ModelID, manifests, nodemodels.HostCapacity{
+		VRAMTotalMB: resources.VRAMTotalMB,
+		RAMTotalMB:  resources.RAMTotalMB,
+		DiskFreeMB:  resources.DiskFreeMB,
+	})
+	if err != nil {
+		return err
+	}
+	cfg.ModelID = selection.ModelID
+	if err := nodeconfig.Save(cfg); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stdout, "hardware: gpu vendor %s, %s, %dMB RAM, %dMB free disk\n",
+		gpuVendor, describeDetectedVRAM(resources), resources.RAMTotalMB, resources.DiskFreeMB)
+	fmt.Fprintf(os.Stdout, "selected %s: %s\n", selection.ModelID, selection.Reason)
+	if selection.VRAMAssumed {
+		fmt.Fprintf(os.Stdout,
+			"warning: VRAM was not measured on this host, so the VRAM floor for %s is unverified; if the runtime runs out of memory, rerun with an explicit smaller --model\n",
+			selection.ModelID)
+	}
+	fmt.Fprintf(os.Stdout, "starting node %s\n", login.Credentials.NodeID)
 	return nodeagent.Run(ctx, nodeagent.Options{
 		DataDir:           cfg.DataDir,
 		CatalogDir:        *catalogDir,
 		CoordinatorURL:    login.Credentials.CoordinatorURL,
-		ModelID:           cfg.ModelID,
+		ModelID:           selection.ModelID,
 		AccessToken:       login.Credentials.AccessToken,
 		NodeID:            login.Credentials.NodeID,
 		HeartbeatInterval: *heartbeatInterval,
@@ -516,4 +543,11 @@ func printUsage(w *os.File) {
 	fmt.Fprintln(w, "  thirdshift update --manifest <release-manifest-url>")
 	fmt.Fprintln(w, "  thirdshift card [--json]")
 	fmt.Fprintln(w, "  thirdshift version")
+}
+
+func describeDetectedVRAM(resources hardware.HostResources) string {
+	if !resources.VRAMKnown() {
+		return "VRAM unknown"
+	}
+	return fmt.Sprintf("%dMB VRAM", resources.VRAMTotalMB)
 }
