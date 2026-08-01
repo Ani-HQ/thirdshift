@@ -23,6 +23,7 @@ type LocalRuntimeProvider struct {
 	ModelCacheDir    string
 	ModelQuotaBytes  int64
 	RuntimePublicKey ed25519.PublicKey
+	GPUVendor        string
 	RuntimeEnv       []string
 	HTTPClient       *http.Client
 	StartupTimeout   time.Duration
@@ -76,6 +77,7 @@ func (p *LocalRuntimeProvider) Prepare(ctx context.Context, modelID string) (Run
 	installed, err := noderuntime.Manager{
 		Root:       p.RuntimeRoot,
 		PublicKey:  publicKey,
+		GPUVendor:  p.GPUVendor,
 		HTTPClient: p.HTTPClient,
 	}.Ensure(ctx, runtimeManifest)
 	if err != nil {

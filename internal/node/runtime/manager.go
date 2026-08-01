@@ -23,7 +23,10 @@ type Manager struct {
 	Root        string
 	PublicKey   ed25519.PublicKey
 	PlatformKey string
-	HTTPClient  *http.Client
+	// GPUVendor picks a vendor-specific runtime build when the manifest has
+	// one. Empty or "unknown" falls back to the bare platform artifact.
+	GPUVendor  string
+	HTTPClient *http.Client
 }
 
 type InstalledRuntime struct {
@@ -49,10 +52,13 @@ func (m Manager) Ensure(ctx context.Context, manifest ReleaseManifest) (Installe
 	if platformKey == "" {
 		platformKey = goruntime.GOOS + "/" + goruntime.GOARCH
 	}
-	artifact, ok := manifest.Artifacts[platformKey]
-	if !ok {
-		return InstalledRuntime{}, fmt.Errorf("runtime artifact for platform %s is not in manifest", platformKey)
+	artifact, artifactKey, err := manifest.SelectArtifact(platformKey, m.GPUVendor)
+	if err != nil {
+		return InstalledRuntime{}, err
 	}
+	// The resolved key, not the bare platform, identifies the install so a CUDA
+	// and a Vulkan build of the same release never share a directory.
+	platformKey = artifactKey
 	if artifact.ExecutablePath == "" {
 		return InstalledRuntime{}, fmt.Errorf("runtime artifact for %s has no executable_path", platformKey)
 	}

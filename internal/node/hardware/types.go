@@ -34,6 +34,7 @@ type DoctorReport struct {
 	OS          string        `json:"os"`
 	Arch        string        `json:"arch"`
 	Overall     string        `json:"overall"`
+	GPUVendor   string        `json:"gpu_vendor,omitempty"`
 	Checks      []CheckResult `json:"checks"`
 	GPUs        []GPU         `json:"gpus,omitempty"`
 }

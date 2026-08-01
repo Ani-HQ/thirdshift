@@ -188,7 +188,13 @@ func runStart(args []string) error {
 	if *runtimeBaseURL != "" {
 		runtimeProvider = nodeagent.ExistingRuntimeProvider{CatalogDir: *catalogDir, BaseURL: *runtimeBaseURL}
 	}
-	fmt.Fprintf(os.Stdout, "starting node %s\n", login.Credentials.NodeID)
+	// Vendor decides which runtime build the node installs and is reported on
+	// every heartbeat. Detection is best effort: unknown falls back to the bare
+	// platform artifact, which is the pre-Vulkan behavior.
+	vendorCtx, cancelVendor := context.WithTimeout(ctx, 10*time.Second)
+	gpuVendor := hardware.DetectGPUVendor(vendorCtx, nil, goruntime.GOOS)
+	cancelVendor()
+	fmt.Fprintf(os.Stdout, "starting node %s (gpu vendor: %s)\n", login.Credentials.NodeID, gpuVendor)
 	return nodeagent.Run(ctx, nodeagent.Options{
 		DataDir:           cfg.DataDir,
 		CatalogDir:        *catalogDir,
@@ -204,6 +210,7 @@ func runStart(args []string) error {
 		HardTempC:         cfg.HardTempC,
 		ThermalHysteresis: cfg.ThermalHysteresis,
 		PauseIdleTimeout:  cfg.PauseIdleTimeout,
+		GPUVendor:         gpuVendor,
 		Output:            os.Stdout,
 	})
 }

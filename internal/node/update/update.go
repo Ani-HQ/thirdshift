@@ -190,6 +190,8 @@ func selectArtifact(manifest noderuntime.ReleaseManifest, platformKey string) (n
 	if platformKey == "" {
 		platformKey = goruntime.GOOS + "/" + goruntime.GOARCH
 	}
+	// The app updater ships one build per platform, so it resolves the bare
+	// platform key. Vendor-specific keys are a runtime-engine concern.
 	artifact, ok := manifest.Artifacts[platformKey]
 	if !ok {
 		return noderuntime.RuntimeArtifact{}, "", fmt.Errorf("release artifact for platform %s is not in manifest", platformKey)

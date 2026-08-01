@@ -19,6 +19,7 @@
       "power_limit_w": 180,
       "utilization_percent": 4
     },
+    "gpu_vendor": "nvidia",
     "active_job_id": null,
     "schedule_state": "in_window",
     "thermal_state": "normal",

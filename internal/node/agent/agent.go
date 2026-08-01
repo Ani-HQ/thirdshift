@@ -67,6 +67,9 @@ type Options struct {
 	ThermalHysteresis int
 	PauseIdleTimeout  time.Duration
 	ThermalPoll       time.Duration
+	// GPUVendor is the detected host GPU vendor. It rides on the heartbeat so
+	// the operator can see what backend a host is serving with.
+	GPUVendor string
 }
 
 type Agent struct {
@@ -128,7 +131,7 @@ func New(opts Options) (*Agent, error) {
 		opts.Telemetry = telemetry.DefaultProvider()
 	}
 	if opts.Runtime == nil {
-		opts.Runtime = &LocalRuntimeProvider{CatalogDir: opts.CatalogDir, DataDir: opts.DataDir, HTTPClient: opts.HTTPClient}
+		opts.Runtime = &LocalRuntimeProvider{CatalogDir: opts.CatalogDir, DataDir: opts.DataDir, GPUVendor: opts.GPUVendor, HTTPClient: opts.HTTPClient}
 	}
 	if opts.Output == nil {
 		opts.Output = io.Discard
@@ -418,7 +421,7 @@ func (a *Agent) sendHeartbeat(ctx context.Context, conn *websocket.Conn) error {
 	paused := a.pauseRequested || a.state == nodestate.Paused
 	draining := a.state == nodestate.Draining
 	a.mu.Unlock()
-	heartbeat := buildHeartbeat(a.opts.NodeID, sequence, state, runtimeStatus, gpu, activeJobID, scheduleState, thermalState, paused, draining, uptime, a.opts.now())
+	heartbeat := buildHeartbeat(a.opts.NodeID, sequence, state, runtimeStatus, gpu, a.opts.GPUVendor, activeJobID, scheduleState, thermalState, paused, draining, uptime, a.opts.now())
 	if err := a.writeEnvelope(ctx, conn, protocol.TypeNodeHeartbeat, heartbeat); err != nil {
 		return err
 	}
@@ -432,10 +435,10 @@ func (a *Agent) sendHeartbeat(ctx context.Context, conn *websocket.Conn) error {
 }
 
 func BuildHeartbeat(nodeID string, sequence int64, state nodestate.State, runtimeStatus RuntimeStatus, gpu protocol.GPUStatus, uptimeSeconds int64, now time.Time) protocol.NodeHeartbeatPayload {
-	return buildHeartbeat(nodeID, sequence, state, runtimeStatus, gpu, nil, nodeschedule.StateInWindow, "normal", false, state == nodestate.Draining, uptimeSeconds, now)
+	return buildHeartbeat(nodeID, sequence, state, runtimeStatus, gpu, "", nil, nodeschedule.StateInWindow, "normal", false, state == nodestate.Draining, uptimeSeconds, now)
 }
 
-func buildHeartbeat(nodeID string, sequence int64, state nodestate.State, runtimeStatus RuntimeStatus, gpu protocol.GPUStatus, activeJobID *string, scheduleState, thermalState string, paused, draining bool, uptimeSeconds int64, now time.Time) protocol.NodeHeartbeatPayload {
+func buildHeartbeat(nodeID string, sequence int64, state nodestate.State, runtimeStatus RuntimeStatus, gpu protocol.GPUStatus, gpuVendor string, activeJobID *string, scheduleState, thermalState string, paused, draining bool, uptimeSeconds int64, now time.Time) protocol.NodeHeartbeatPayload {
 	return protocol.NodeHeartbeatPayload{
 		NodeID:        nodeID,
 		Sequence:      sequence,
@@ -444,6 +447,7 @@ func buildHeartbeat(nodeID string, sequence int64, state nodestate.State, runtim
 		RuntimeHash:   runtimeStatus.RuntimeHash,
 		ModelHash:     runtimeStatus.ModelHash,
 		GPU:           gpu,
+		GPUVendor:     gpuVendor,
 		ActiveJobID:   activeJobID,
 		ScheduleState: scheduleState,
 		ThermalState:  thermalState,
