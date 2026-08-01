@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Auto model selection now assumes the 8GB platform floor when VRAM cannot be measured, instead of selecting on RAM alone: a high-RAM host with an unreadable GPU would otherwise be handed the largest model in the catalog.
+
 - `thirdshift start` now selects a model automatically: it measures GPU vendor, VRAM, RAM and free disk, runs the largest catalog model that fits, and logs the choice with the numbers behind it. `--model auto` requests this explicitly; `--model <id>` still pins one and is now refused up front when the hardware cannot run it. Hidden-listing models are never auto-selected.
 
 - Added AMD Radeon host support on Windows via llama.cpp's Vulkan backend: runtime release manifests gain optional per-backend artifact keys (`windows/amd64/cuda`, `windows/amd64/vulkan`) with the bare platform key as a fallback, and the node picks its build from the detected GPU vendor.

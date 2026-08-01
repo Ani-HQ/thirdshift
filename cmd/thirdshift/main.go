@@ -172,9 +172,10 @@ func runStart(args []string) error {
 	if *coordinatorURL != "" {
 		cfg.CoordinatorURL = *coordinatorURL
 	}
-	if *modelID != "" {
-		cfg.ModelID = *modelID
-	}
+	// The model comes from the flag, not from config: with no flag this command
+	// re-selects from current hardware every start, so a GPU change is picked up
+	// rather than being pinned to whatever a previous run happened to choose.
+	requestedModel := *modelID
 	login, err := noderegistration.Login(ctx, noderegistration.LoginOptions{
 		DataDir:        cfg.DataDir,
 		CoordinatorURL: cfg.CoordinatorURL,
@@ -200,7 +201,7 @@ func runStart(args []string) error {
 	if err != nil {
 		return err
 	}
-	selection, err := nodemodels.ResolveModel(cfg.ModelID, manifests, nodemodels.HostCapacity{
+	selection, err := nodemodels.ResolveModel(requestedModel, manifests, nodemodels.HostCapacity{
 		VRAMTotalMB: resources.VRAMTotalMB,
 		RAMTotalMB:  resources.RAMTotalMB,
 		DiskFreeMB:  resources.DiskFreeMB,
@@ -208,7 +209,11 @@ func runStart(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg.ModelID = selection.ModelID
+	// Only an explicit choice is remembered. Persisting an auto pick would turn
+	// the next bare `thirdshift start` into a pinned one.
+	if requestedModel != "" && !strings.EqualFold(strings.TrimSpace(requestedModel), nodemodels.AutoModelID) {
+		cfg.ModelID = selection.ModelID
+	}
 	if err := nodeconfig.Save(cfg); err != nil {
 		return err
 	}
