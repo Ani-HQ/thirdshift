@@ -55,6 +55,8 @@ thirdshift update --verify-only \
 
 ## Release Checklist
 
+0. Deploy the coordinator BEFORE publishing a node release whenever the protocol gained fields. Node-to-coordinator payloads are `additionalProperties: false`, so a node that sends a field its coordinator does not know is disconnected on every message (D-108).
+
 1. Run the full local test matrix from `CONTRIBUTING.md`.
 2. Run the Windows script parser check in CI.
 3. Confirm `release-manifest.json` has a non-empty signature.
