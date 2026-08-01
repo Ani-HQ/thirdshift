@@ -333,6 +333,10 @@ func (o Options) handleSession(ctx context.Context, conn *websocket.Conn, tokenN
 	}
 	hello, err := o.ProtocolValidator.ValidateEnvelope(helloData)
 	if err != nil || hello.Type != protocol.TypeNodeHello {
+		// Logged because a schema rejection here is indistinguishable from a
+		// network drop at the node, and is exactly what a coordinator running
+		// an older protocol than its nodes produces.
+		o.logger().WarnContext(ctx, "rejected node hello", "node_id", tokenNodeID, "type", hello.Type, "error", err)
 		_ = conn.Close(websocket.StatusPolicyViolation, "invalid hello")
 		return
 	}
@@ -373,6 +377,7 @@ func (o Options) handleSession(ctx context.Context, conn *websocket.Conn, tokenN
 		}
 		envelope, err := o.ProtocolValidator.ValidateEnvelope(data)
 		if err != nil {
+			o.logger().WarnContext(ctx, "rejected node message", "node_id", tokenNodeID, "session_id", sessionID, "error", err)
 			_ = conn.Close(websocket.StatusPolicyViolation, "invalid protocol message")
 			return
 		}
