@@ -134,11 +134,13 @@ func TestSelectModelHonorsRAMAndDiskFloors(t *testing.T) {
 	}
 }
 
-// The AMD/WMI path often cannot establish VRAM. Selection then rests on RAM
-// alone and must say so loudly rather than quietly guessing a tier.
-func TestUnknownVRAMFallsBackToRAMAndFlagsIt(t *testing.T) {
+// The AMD/WMI path often cannot establish VRAM. Selection must then assume the
+// platform floor rather than ignoring the VRAM requirement: a machine with lots
+// of RAM and an unreadable card would otherwise be handed the largest model in
+// the catalog and OOM on any ordinary GPU.
+func TestUnknownVRAMAssumesThePlatformFloorAndFlagsIt(t *testing.T) {
 	manifests := catalogForTest(t)
-	host := HostCapacity{VRAMTotalMB: VRAMUnmeasured, RAMTotalMB: 32768, DiskFreeMB: 500000}
+	host := HostCapacity{VRAMTotalMB: VRAMUnmeasured, RAMTotalMB: 65536, DiskFreeMB: 500000}
 
 	selection, err := SelectModel(manifests, host)
 	if err != nil {
@@ -147,11 +149,12 @@ func TestUnknownVRAMFallsBackToRAMAndFlagsIt(t *testing.T) {
 	if !selection.VRAMAssumed {
 		t.Fatal("a selection made without a VRAM measurement must be flagged")
 	}
+	if int64(selection.Manifest.Hardware.MinVRAMMB) > UnmeasuredVRAMFloorMB {
+		t.Fatalf("unmeasured VRAM selected %s needing %dMB VRAM; must not exceed the assumed floor of %dMB",
+			selection.ModelID, selection.Manifest.Hardware.MinVRAMMB, UnmeasuredVRAMFloorMB)
+	}
 	if !strings.Contains(selection.Reason, "VRAM could not be measured") {
 		t.Fatalf("reason should say VRAM was not measured: %q", selection.Reason)
-	}
-	if !strings.Contains(selection.Reason, "unverified") {
-		t.Fatalf("reason should mark the VRAM floor unverified: %q", selection.Reason)
 	}
 
 	// Nothing fits on RAM either: refuse, and say why the usual check was skipped.

@@ -82,8 +82,20 @@ func bySizeDescending(manifests []Manifest) {
 // Fits reports whether the host satisfies a manifest's hardware floor. When
 // VRAM is unknown the VRAM floor cannot be checked and is skipped; the caller
 // is responsible for telling the operator that happened.
+// UnmeasuredVRAMFloorMB is the VRAM an unmeasurable host is assumed to have:
+// the platform minimum, not unlimited. Unmeasured VRAM used to mean "ignore
+// the VRAM requirement", which on a 64GB-RAM machine with an unreadable card
+// selected the largest model in the catalog and would OOM on any ordinary GPU.
+// Assuming the floor picks something that will actually run; an operator who
+// knows the real number can still pass --model explicitly.
+const UnmeasuredVRAMFloorMB int64 = 8192
+
 func Fits(manifest Manifest, host HostCapacity) bool {
-	if host.vramKnown() && int64(manifest.Hardware.MinVRAMMB) > host.VRAMTotalMB {
+	vram := host.VRAMTotalMB
+	if !host.vramKnown() {
+		vram = UnmeasuredVRAMFloorMB
+	}
+	if int64(manifest.Hardware.MinVRAMMB) > vram {
 		return false
 	}
 	if host.RAMTotalMB > 0 && int64(manifest.Hardware.MinRAMMB) > host.RAMTotalMB {
@@ -125,8 +137,8 @@ func SelectModel(manifests []Manifest, host HostCapacity) (Selection, error) {
 			ModelID:     manifest.ModelID,
 			Manifest:    manifest,
 			VRAMAssumed: true,
-			Reason: fmt.Sprintf("VRAM could not be measured, so this was chosen on RAM alone: %dMB RAM available, needs %dMB RAM and %dMB VRAM (unverified)",
-				host.RAMTotalMB, manifest.Hardware.MinRAMMB, manifest.Hardware.MinVRAMMB),
+			Reason: fmt.Sprintf("VRAM could not be measured, so %dMB was assumed (the platform minimum): needs %dMB VRAM and %dMB RAM. Pass --model explicitly to run a larger model once the real VRAM is known",
+				UnmeasuredVRAMFloorMB, manifest.Hardware.MinVRAMMB, manifest.Hardware.MinRAMMB),
 		}, nil
 	}
 
