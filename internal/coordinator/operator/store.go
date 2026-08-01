@@ -1384,7 +1384,11 @@ FROM nodes n
 LEFT JOIN fleets f ON f.id = n.fleet_id
 JOIN latest_session ls ON ls.node_id = n.id
 LEFT JOIN credit c ON c.node_id = n.id
+-- A host appears once it has earned something, or while it is actually
+-- connected. A machine that registered, never served, and went away is a
+-- test artifact, not a contributor, and should not decorate the ticker.
 WHERE ls.freshness >= $1
+  AND (COALESCE(c.credited_total, 0) > 0 OR ls.state = 'connected')
 ORDER BY COALESCE(c.credited_total, 0) DESC, n.id
 `, now.Add(-24*time.Hour), now.Add(-s.staleAfter()))
 	if err != nil {
