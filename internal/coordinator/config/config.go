@@ -34,6 +34,9 @@ const (
 	envAlertRuntimeCrash     = "THIRDSHIFT_ALERT_RUNTIME_CRASH_THRESHOLD"
 	envAlertAuthAnomaly      = "THIRDSHIFT_ALERT_AUTH_ANOMALY_THRESHOLD"
 	envRequesterRegionHeader = "THIRDSHIFT_REQUESTER_REGION_HEADER"
+	envCairoHost             = "CAIRO_HOST"
+	envCairoWriteKey         = "CAIRO_WRITE_KEY"
+	envCairoNamespace        = "CAIRO_NAMESPACE"
 )
 
 type Config struct {
@@ -50,6 +53,9 @@ type Config struct {
 	CreditHold            time.Duration
 	Alerts                operatorstore.AlertConfig
 	RequesterRegionHeader string
+	CairoHost             string
+	CairoWriteKey         string
+	CairoNamespace        string
 }
 
 func Load(defaultVersion string) Config {
@@ -65,6 +71,9 @@ func Load(defaultVersion string) Config {
 		StaleSweepInterval:    durationSeconds(envSweepSeconds, 15*time.Second),
 		CreditHold:            durationSeconds(envCreditHoldSeconds, 24*time.Hour),
 		RequesterRegionHeader: getenv(envRequesterRegionHeader, "X-Geo-Region"),
+		CairoHost:             os.Getenv(envCairoHost),
+		CairoWriteKey:         os.Getenv(envCairoWriteKey),
+		CairoNamespace:        getenv(envCairoNamespace, "default"),
 		Alerts: operatorstore.AlertConfig{
 			DisconnectSpikeWindow:     alerts.DisconnectSpikeWindow,
 			DisconnectSpikeThreshold:  intEnv(envAlertDisconnects, alerts.DisconnectSpikeThreshold),

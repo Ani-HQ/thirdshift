@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Ani-HQ/thirdshift/internal/coordinator/auth"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/cairo"
 	"github.com/Ani-HQ/thirdshift/internal/coordinator/config"
 	"github.com/Ani-HQ/thirdshift/internal/coordinator/httpapi"
 	"github.com/Ani-HQ/thirdshift/internal/coordinator/jobs"
@@ -75,6 +76,12 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		cairoTracker := &cairo.Tracker{
+			Host:      cfg.CairoHost,
+			WriteKey:  cfg.CairoWriteKey,
+			Namespace: cfg.CairoNamespace,
+			Logger:    logger,
+		}
 		handler = httpapi.NewMuxWithOptions(httpapi.Options{
 			Version: cfg.Version,
 			Registration: registration.Service{
@@ -89,8 +96,12 @@ func run() error {
 			OperatorToken:         cfg.OperatorToken,
 			HeartbeatInterval:     cfg.HeartbeatInterval,
 			RequesterRegionHeader: cfg.RequesterRegionHeader,
+			Cairo:                 cairoTracker,
 			Logger:                logger,
 		})
+		if cairoTracker.Enabled() {
+			logger.Info("cairo waitlist notifications enabled", "host", cfg.CairoHost, "namespace", cfg.CairoNamespace)
+		}
 	}
 
 	server := &http.Server{
