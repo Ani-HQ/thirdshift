@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { publicFetch, publicPost } from "../lib/api";
 import { EarningsTicker } from "./EarningsTicker";
 import { WorldMap } from "./WorldMap";
@@ -45,6 +45,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
   const [applicationMessage, setApplicationMessage] = useState("");
   const [copied, setCopied] = useState(false);
   const [demoPulse, setDemoPulse] = useState(0);
+  const applicationRef = useRef<HTMLElement | null>(null);
   const accessPoint = useMemo(() => clientTimezoneRegion(), []);
   const demoActive = shouldUseDemoNetwork(status);
   const displayStatus = status && demoActive ? withDemoNetworkStats(status) : status;
@@ -70,6 +71,17 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
     }, 7_000);
     return () => window.clearInterval(timer);
   }, [demoActive]);
+
+  useEffect(() => {
+    if (!activeModel) {
+      return;
+    }
+    // Wait a frame so the form is in the DOM before scrolling to it.
+    const frame = window.requestAnimationFrame(() => {
+      applicationRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeModel]);
 
   async function refresh() {
     try {
@@ -197,7 +209,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
         </section>
 
         {activeModel ? (
-          <section className="application" aria-label="Access application">
+          <section ref={applicationRef} className="application" aria-label="Access application">
             <div className="section-head">
               <h2>Request access to {modelName(models, activeModel)}</h2>
               <button type="button" className="quiet" onClick={() => setActiveModel(null)}>

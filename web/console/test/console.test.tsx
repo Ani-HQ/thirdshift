@@ -256,6 +256,21 @@ describe("console components", () => {
     expect(screen.queryByText("Thirdshift Tiny Chat v1")).not.toBeInTheDocument();
   });
 
+  it("apply for access scrolls the application form into view", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    });
+    const status = publicStatusFixture({ models: [waitlistModelFixture()] });
+    stubStatusFetch(status);
+    render(<PublicStatusPage initialStatus={status} />);
+    openApplicationForm();
+    expect(screen.getByRole("form", { name: "Access application form" })).toBeInTheDocument();
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+  });
+
   it("application form requires a use case and the data-class acknowledgment", async () => {
     const status = publicStatusFixture({ models: [waitlistModelFixture()] });
     const fetchMock = stubStatusFetch(status);
