@@ -121,21 +121,21 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
       <div className="public-column">
         <header className="public-header">
           <p className="wordmark">Thirdshift</p>
-          <h1>Open models, served by idle gaming PCs.</h1>
+          <h1>Limitless AI in an AI-less world.</h1>
           <p className="lede">
-            Small open models at prices below typical hosted inference. Alpha access is reviewed by hand: tell us what
-            you are building and we will keep you posted.
+            A community network for affordable open-model access outside the AI bubble — for builders in places big
+            labs ignore. Powered by idle gaming PCs. Alpha is reviewed by hand.
           </p>
         </header>
 
         <EarningsTicker hosts={status?.hosts || []} />
 
         <section className="figures" aria-label="Network status">
-          <Figure label="Nodes online" value={status ? String(status.connected_node_count) : null} />
-          <Figure label="Regions online" value={status ? String(status.regions_online.length) : null} />
-          <Figure label="Jobs 24h" value={status ? status.jobs_completed_24h.toLocaleString() : null} />
-          <Figure label="Tokens 24h" value={status ? status.output_tokens_served_24h.toLocaleString() : null} />
-          <Figure label="Access point" value={status ? requesterRegion || "Unknown" : null} />
+          <Figure label="Machines online" value={status ? String(status.connected_node_count) : null} />
+          <Figure label="Regions" value={status ? String(status.regions_online.length) : null} />
+          <Figure label="Completions (24h)" value={status ? status.jobs_completed_24h.toLocaleString() : null} />
+          <Figure label="Tokens served (24h)" value={status ? status.output_tokens_served_24h.toLocaleString() : null} />
+          <Figure label="Your region" value={status ? requesterRegion || "Unknown" : null} />
         </section>
 
         {error ? <p className="public-error">{error}</p> : null}
@@ -148,7 +148,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
             </button>
           </div>
           <p className="section-note">
-            Availability is aggregate only. Host machines and their operators stay private.
+            Open models at community prices. Availability is aggregate — hosts stay private.
           </p>
           {!status ? <ModelRowsSkeleton /> : null}
           {status && models.length === 0 ? (
@@ -198,7 +198,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
                   value={useCase}
                   onChange={(event) => setUseCase(event.target.value)}
                   rows={4}
-                  placeholder="Batch summarization for an internal tool, evaluation harness, prototype agent"
+                  placeholder="Local-language tools, student projects, batch jobs, agents — what are you building?"
                 />
               </label>
               <label>
@@ -221,7 +221,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
               </label>
               <div className="application-actions">
                 <button type="submit" className="solid" disabled={applicationState === "submitting"}>
-                  {applicationState === "submitting" ? "Sending" : "Request access"}
+                  {applicationState === "submitting" ? "Sending" : "Apply for access"}
                 </button>
                 {applicationMessage ? (
                   <p className={`form-note ${applicationState}`} role="status">
@@ -233,19 +233,20 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
           </section>
         ) : null}
 
-        <section className="request-shape" aria-label="Request shape">
+        <section className="request-shape" aria-label="API">
           <div className="section-head">
-            <h2>Request shape</h2>
+            <h2>Call it like OpenAI</h2>
             <button type="button" className="quiet" onClick={() => void copyCurl()}>
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
+          <p className="section-note">Same request shape. Open models. No GPU ops on your side.</p>
           <pre>{curlExample}</pre>
         </section>
 
         <footer className="public-footer">
           <span>
-            Public or non-sensitive data only. Thirdshift is not confidential compute.{" "}
+            Built for public or non-sensitive workloads. Not confidential compute.{" "}
             <a href="https://github.com/Ani-HQ/thirdshift">GitHub</a>
           </span>
         </footer>
@@ -325,7 +326,7 @@ function ModelRow({
         </p>
         <p className="speed">{speedLabel(model)}</p>
         <button type="button" className={waitlisted ? "outline" : "solid"} onClick={onRequest}>
-          Request access
+          Apply for access
         </button>
       </div>
     </article>
