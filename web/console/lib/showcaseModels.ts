@@ -2,8 +2,8 @@ import type { PublicCatalogModel } from "./types";
 
 /**
  * Marketing catalog fillers shown on the public status page until the real
- * host supply and signed manifests catch up. Every entry is waitlisted — never
- * marked available — so the page can look serious without inventing capacity.
+ * host supply and signed manifests catch up. Entries start waitlisted; the
+ * demo-network layer can paint popular ones as online for early traction.
  * Drop this file (and the merge call) once the live catalog is broad enough.
  */
 export const SHOWCASE_MODELS: PublicCatalogModel[] = [

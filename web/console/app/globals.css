@@ -417,16 +417,49 @@ body:has(.public-page) {
 }
 
 .map-cell.hot {
-  animation: map-breathe 3.6s ease-in-out infinite;
+  animation: map-breathe 3.2s ease-in-out infinite;
+}
+
+.map-cell.hot.core {
+  animation: map-glow 2.4s ease-in-out infinite;
+}
+
+.map-cell.hot.heat-2.core,
+.map-cell.hot.heat-3.core {
+  animation: map-glow-strong 2s ease-in-out infinite;
 }
 
 @keyframes map-breathe {
   0%,
   100% {
-    opacity: 0.85;
+    opacity: 0.82;
   }
   50% {
     opacity: 1;
+  }
+}
+
+@keyframes map-glow {
+  0%,
+  100% {
+    opacity: 0.72;
+    filter: drop-shadow(0 0 0 rgba(26, 26, 31, 0));
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 2.5px rgba(26, 26, 31, 0.45));
+  }
+}
+
+@keyframes map-glow-strong {
+  0%,
+  100% {
+    opacity: 0.7;
+    filter: drop-shadow(0 0 0 rgba(26, 26, 31, 0));
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 4px rgba(26, 26, 31, 0.55));
   }
 }
 
@@ -506,8 +539,12 @@ body:has(.public-page) {
 
 @media (prefers-reduced-motion: reduce) {
   .map-cell.hot,
+  .map-cell.hot.core,
+  .map-cell.hot.heat-2.core,
+  .map-cell.hot.heat-3.core,
   .ticker-track.scrolling {
     animation: none;
+    filter: none;
   }
 }
 

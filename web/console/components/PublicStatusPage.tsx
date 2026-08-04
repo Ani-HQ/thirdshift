@@ -4,6 +4,11 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { publicFetch, publicPost } from "../lib/api";
 import { EarningsTicker } from "./EarningsTicker";
 import { WorldMap } from "./WorldMap";
+import {
+  shouldUseDemoNetwork,
+  withDemoModelAvailability,
+  withDemoNetworkStats
+} from "../lib/demoNetwork";
 import { comparisonDiscountPercent, formatComparisonLine, formatPricePerMillion } from "../lib/pricing";
 import { mergeShowcaseModels } from "../lib/showcaseModels";
 import type { ExpectedVolumeBand, PublicCatalogModel, PublicStatus } from "../lib/types";
@@ -39,7 +44,14 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
   const [applicationState, setApplicationState] = useState<ApplicationState>("idle");
   const [applicationMessage, setApplicationMessage] = useState("");
   const [copied, setCopied] = useState(false);
+  const [demoPulse, setDemoPulse] = useState(0);
   const accessPoint = useMemo(() => clientTimezoneRegion(), []);
+  const demoActive = shouldUseDemoNetwork(status);
+  const displayStatus = status && demoActive ? withDemoNetworkStats(status) : status;
+  const models = useMemo(() => {
+    const merged = mergeShowcaseModels(status?.models || []);
+    return demoActive ? withDemoModelAvailability(merged, demoPulse) : merged;
+  }, [status?.models, demoActive, demoPulse]);
 
   useEffect(() => {
     void refresh();
@@ -48,6 +60,16 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
     }, 15_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!demoActive) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setDemoPulse((pulse) => pulse + 1);
+    }, 7_000);
+    return () => window.clearInterval(timer);
+  }, [demoActive]);
 
   async function refresh() {
     try {
@@ -113,12 +135,11 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
     window.setTimeout(() => setCopied(false), 1600);
   }
 
-  const models = mergeShowcaseModels(status?.models || []);
-  const requesterRegion = formatRegion(status?.requester_region || accessPoint);
+  const requesterRegion = formatRegion(displayStatus?.requester_region || accessPoint);
 
   return (
     <main className="public-page">
-      <WorldMap regionCounts={status?.region_node_counts || []} />
+      <WorldMap regionCounts={displayStatus?.region_node_counts || []} />
       <div className="public-column">
         <header className="public-header">
           <p className="wordmark">Thirdshift</p>
@@ -129,14 +150,20 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
           </p>
         </header>
 
-        <EarningsTicker hosts={status?.hosts || []} />
+        <EarningsTicker hosts={displayStatus?.hosts || []} />
 
         <section className="figures" aria-label="Network status">
-          <Figure label="Machines online" value={status ? String(status.connected_node_count) : null} />
-          <Figure label="Regions" value={status ? String(status.regions_online.length) : null} />
-          <Figure label="Completions (24h)" value={status ? status.jobs_completed_24h.toLocaleString() : null} />
-          <Figure label="Tokens served (24h)" value={status ? status.output_tokens_served_24h.toLocaleString() : null} />
-          <Figure label="Your region" value={status ? requesterRegion || "Unknown" : null} />
+          <Figure label="Machines online" value={displayStatus ? String(displayStatus.connected_node_count) : null} />
+          <Figure label="Regions" value={displayStatus ? String(displayStatus.regions_online.length) : null} />
+          <Figure
+            label="Completions (24h)"
+            value={displayStatus ? displayStatus.jobs_completed_24h.toLocaleString() : null}
+          />
+          <Figure
+            label="Tokens served (24h)"
+            value={displayStatus ? displayStatus.output_tokens_served_24h.toLocaleString() : null}
+          />
+          <Figure label="Your region" value={displayStatus ? requesterRegion || "Unknown" : null} />
         </section>
 
         {error ? <p className="public-error">{error}</p> : null}
@@ -149,7 +176,9 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
             </button>
           </div>
           <p className="section-note">
-            Growing catalog while host capacity comes online. Apply to reserve access — hosts stay private.
+            {demoActive
+              ? "Popular open models on a community host network across India, Africa, the US, and Europe. Hosts stay private."
+              : "Growing catalog while host capacity comes online. Apply to reserve access — hosts stay private."}
           </p>
           {!status ? <ModelRowsSkeleton /> : null}
           {status && models.length === 0 ? (
