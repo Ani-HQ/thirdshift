@@ -369,14 +369,14 @@ body:has(.public-page) {
 }
 
 .public-header h1 {
-  max-width: 20em;
+  max-width: 16em;
   margin-top: 18px;
   font-size: 32px;
   line-height: 1.2;
 }
 
 .public-header .lede {
-  max-width: 34em;
+  max-width: 36em;
   margin-top: 14px;
   color: var(--pub-secondary);
   font-size: 16px;

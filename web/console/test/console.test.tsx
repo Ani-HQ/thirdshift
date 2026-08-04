@@ -79,7 +79,7 @@ describe("console components", () => {
     const status = publicStatusFixture({ models: [liveModelFixture()] });
     stubStatusFetch(status);
     render(<PublicStatusPage initialStatus={status} />);
-    expect(screen.getByText("Nodes online")).toBeInTheDocument();
+    expect(screen.getByText("Machines online")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument();
     expect(screen.getByText("Qwen2.5 7B Instruct")).toBeInTheDocument();
     expect(screen.getByText("$0.03 in / $0.08 out")).toBeInTheDocument();
@@ -95,7 +95,7 @@ describe("console components", () => {
     const row = within(requireElement(container, ".model-row"));
     expect(row.getByText("Available on request")).toBeInTheDocument();
     expect(row.getByText("Expected 30 tok/s")).toBeInTheDocument();
-    expect(row.getByRole("button", { name: "Request access" })).toBeInTheDocument();
+    expect(row.getByRole("button", { name: "Apply for access" })).toBeInTheDocument();
     expect(row.queryByText(/serving it/)).not.toBeInTheDocument();
     expect(row.queryByText(/node/i)).not.toBeInTheDocument();
     expect(row.queryByText(/machine/i)).not.toBeInTheDocument();
@@ -209,7 +209,7 @@ describe("console components", () => {
     expect(await screen.findByText("Tell us what you plan to build.")).toBeInTheDocument();
 
     fireEvent.change(
-      screen.getByPlaceholderText("Batch summarization for an internal tool, evaluation harness, prototype agent"),
+      screen.getByPlaceholderText("Local-language tools, student projects, batch jobs, agents — what are you building?"),
       { target: { value: "Nightly evaluation harness" } }
     );
     submitApplicationForm();
@@ -233,7 +233,7 @@ describe("console components", () => {
     });
     fireEvent.change(screen.getByPlaceholderText("Optional"), { target: { value: "Dev" } });
     fireEvent.change(
-      screen.getByPlaceholderText("Batch summarization for an internal tool, evaluation harness, prototype agent"),
+      screen.getByPlaceholderText("Local-language tools, student projects, batch jobs, agents — what are you building?"),
       { target: { value: "Nightly evaluation harness" } }
     );
     fireEvent.change(screen.getByDisplayValue("Select a range"), { target: { value: "1m_10m" } });
@@ -272,7 +272,7 @@ describe("console components", () => {
       target: { value: "dev@example.com" }
     });
     fireEvent.change(
-      screen.getByPlaceholderText("Batch summarization for an internal tool, evaluation harness, prototype agent"),
+      screen.getByPlaceholderText("Local-language tools, student projects, batch jobs, agents — what are you building?"),
       { target: { value: "Nightly evaluation harness" } }
     );
     fireEvent.click(screen.getByRole("checkbox"));
@@ -404,16 +404,16 @@ function requireElement(container: HTMLElement, selector: string): HTMLElement {
   return found;
 }
 
-// The row CTA and the form submit both read "Request access", so both are
+// The row CTA and the form submit both read "Apply for access", so both are
 // queried by their own scope rather than by text alone.
 function openApplicationForm() {
-  const rows = screen.getAllByRole("button", { name: "Request access" });
+  const rows = screen.getAllByRole("button", { name: "Apply for access" });
   fireEvent.click(rows[0]);
 }
 
 function submitApplicationForm() {
   const form = screen.getByRole("form", { name: "Access application form" });
-  fireEvent.click(within(form).getByRole("button", { name: /Request access|Sending/ }));
+  fireEvent.click(within(form).getByRole("button", { name: /Apply for access|Sending/ }));
 }
 
 function stubStatusFetch(status: PublicStatus) {

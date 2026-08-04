@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { PublicStatusPage } from "../../components/PublicStatusPage";
 
 export const metadata: Metadata = {
-  title: "Thirdshift — open models on idle gaming PCs",
-  description: "Model catalog, alpha pricing, and live network status for the Thirdshift community night network"
+  title: "Thirdshift — Limitless AI in an AI-less world",
+  description:
+    "A community network for affordable open-model AI outside the bubble. Open models on idle gaming PCs."
 };
 
 export default function Status() {
