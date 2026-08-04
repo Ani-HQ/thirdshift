@@ -7,10 +7,10 @@ const siteUrl = "https://thirdshift.ani.computer";
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "Thirdshift Console",
+    default: "Thirdshift",
     template: "%s · Thirdshift"
   },
-  description: "Thirdshift alpha operator console and public network status",
+  description: "Limitless AI in an AI-less world.",
   verification: {
     google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || undefined
   }

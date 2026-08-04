@@ -259,6 +259,75 @@ body:has(.public-page) {
   color: #111111;
 }
 
+/* ---------------------------------------------------------------------------
+   Root ASCII lander — full-bleed, monospace, cursor-liquid.
+   --------------------------------------------------------------------------- */
+
+body:has(.ascii-lander) {
+  background: #070708;
+  color: #ececf0;
+  margin: 0;
+  overflow: hidden;
+}
+
+.ascii-lander {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: #070708;
+  color-scheme: dark;
+  cursor: crosshair;
+}
+
+.ascii-lander-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.ascii-lander-brand {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ascii-lander-enter {
+  position: absolute;
+  left: 50%;
+  bottom: max(28px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  letter-spacing: 0.28em;
+  text-transform: lowercase;
+  text-decoration: none;
+  color: rgba(236, 236, 240, 0.28);
+  transition: color 180ms ease-out, letter-spacing 220ms ease-out;
+  z-index: 2;
+}
+
+.ascii-lander-enter:hover,
+.ascii-lander-enter:focus-visible {
+  color: rgba(236, 236, 240, 0.82);
+  letter-spacing: 0.4em;
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ascii-lander-enter {
+    transition: none;
+  }
+}
+
 .public-page {
   --pub-bg: #ffffff;
   --pub-bg-alt: #fafafa;
