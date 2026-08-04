@@ -8,6 +8,12 @@ import { jobActionPath, nodeActionPath } from "../lib/api";
 import { comparisonDiscountPercent, formatPricePerMillion } from "../lib/pricing";
 import { formatEarnings } from "../lib/money";
 import { cellForRegion } from "../lib/regions";
+import {
+  shouldUseDemoNetwork,
+  withDemoModelAvailability,
+  withDemoNetworkStats,
+  setDemoNetworkEnabled
+} from "../lib/demoNetwork";
 import { SHOWCASE_MODELS, mergeShowcaseModels, setShowcaseModelsEnabled } from "../lib/showcaseModels";
 import type {
   JobSummary,
@@ -22,6 +28,7 @@ describe("console components", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     setShowcaseModelsEnabled(false);
+    setDemoNetworkEnabled(false);
   });
 
   it("renders overview metrics from fixture JSON", () => {
@@ -163,6 +170,44 @@ describe("console components", () => {
     expect(screen.getByText("DeepSeek R1 Distill 32B")).toBeInTheDocument();
     expect(screen.getByText("Llama 3.3 70B Instruct")).toBeInTheDocument();
     expect(screen.getAllByText("Available on request").length).toBeGreaterThan(5);
+  });
+
+  it("demo network boosts metrics, lights four regions, and surfaces popular models as online", () => {
+    setShowcaseModelsEnabled(true);
+    setDemoNetworkEnabled(true);
+    const thin = publicStatusFixture({
+      connected_node_count: 2,
+      models: [waitlistModelFixture()],
+      region_node_counts: [],
+      hosts: []
+    });
+    expect(shouldUseDemoNetwork(thin)).toBe(true);
+    const demo = withDemoNetworkStats(thin);
+    expect(demo.connected_node_count).toBe(267);
+    expect(demo.regions_online).toEqual(["in-south", "us-east", "eu-west", "af-south"]);
+    expect(demo.region_node_counts).toHaveLength(4);
+    expect(demo.hosts.length).toBeGreaterThan(5);
+
+    const ranked = withDemoModelAvailability(mergeShowcaseModels(thin.models), 0);
+    expect(ranked[0].model_id).toBe("llama-3.1-8b-instruct");
+    expect(ranked[0].availability.state).toBe("available");
+    expect(ranked.find((model) => model.model_id === "qwen2.5-7b-instruct")?.availability.state).toBe(
+      "available"
+    );
+    const intermittent = ranked.find((model) => model.model_id === "deepseek-r1-distill-qwen-32b");
+    expect(intermittent?.availability.state === "available" || intermittent?.availability.state === "limited").toBe(
+      true
+    );
+
+    stubStatusFetch(thin);
+    const { container } = render(<PublicStatusPage initialStatus={thin} />);
+    const figures = within(requireElement(container, ".figures"));
+    expect(figures.getByText("267")).toBeInTheDocument();
+    expect(figures.getByText("4")).toBeInTheDocument();
+    expect(container.querySelectorAll(".map-cell.hot").length).toBeGreaterThan(10);
+    expect(screen.getAllByText("Available now").length).toBeGreaterThan(3);
+    const llamaRow = within(modelRowByName(container, "Llama 3.1 8B Instruct"));
+    expect(llamaRow.getByText("Available now")).toBeInTheDocument();
   });
 
   it("omits the comparison entirely when a manifest has no market numbers", () => {

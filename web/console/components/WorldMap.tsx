@@ -10,9 +10,10 @@ const GAP = 1;
 const PITCH = CELL + GAP;
 
 // Four steps, like a contribution graph. Land with no machines stays the base
-// whisper grey; heat darkens toward the page's near-black accent.
-const HEAT_FILLS = ["#b0b0b7", "#8a8a92", "#61616a", "#33333a"];
-const HALO_FILL = "#d6d6db";
+// whisper grey; heat darkens toward the page's near-black accent. Busy demo
+// regions push the top of the scale so the map reads as lit, not freckled.
+const HEAT_FILLS = ["#9c9ca4", "#6e6e78", "#3f3f48", "#1a1a1f"];
+const HALO_FILL = "#c8c8cf";
 const LAND_FILL = "#efeff1";
 
 type Heat = { level: number; core: boolean; region: string; nodeCount: number };
@@ -48,10 +49,13 @@ export function WorldMap({ regionCounts }: { regionCounts: RegionNodeCount[] }) 
                 ? HEAT_FILLS[cellHeat.level]
                 : HALO_FILL
               : LAND_FILL;
+            const heatClass = cellHeat
+              ? `map-cell hot heat-${cellHeat.level}${cellHeat.core ? " core" : ""}`
+              : "map-cell";
             return (
               <rect
                 key={key(col, row)}
-                className={cellHeat ? "map-cell hot" : "map-cell"}
+                className={heatClass}
                 x={col * PITCH}
                 y={row * PITCH}
                 width={CELL}
@@ -123,15 +127,15 @@ function buildHeat(regionCounts: RegionNodeCount[]): Map<string, Heat> {
   return heat;
 }
 
-/** Capped 4-step scale: 1, 2-3, 4-9, 10+. */
+/** Capped 4-step scale: 1-3, 4-19, 20-59, 60+. */
 function levelForCount(nodeCount: number): number {
-  if (nodeCount >= 10) {
+  if (nodeCount >= 60) {
     return 3;
   }
-  if (nodeCount >= 4) {
+  if (nodeCount >= 20) {
     return 2;
   }
-  if (nodeCount >= 2) {
+  if (nodeCount >= 4) {
     return 1;
   }
   return 0;
