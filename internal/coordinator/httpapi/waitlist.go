@@ -116,9 +116,20 @@ func (o Options) waitlistSignupHandler(limiter *waitlistRateLimiter) http.Handle
 			writeError(w, http.StatusTooManyRequests, "waitlist signup rate limit exceeded")
 			return
 		}
-		if _, _, err := store.SubmitWaitlistApplication(r.Context(), application, o.now()); err != nil {
+		_, inserted, err := store.SubmitWaitlistApplication(r.Context(), application, o.now())
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if o.Cairo != nil {
+			o.Cairo.NotifyAccessApplicationAsync(application.Email, map[string]any{
+				"name":            application.Name,
+				"use_case":        application.UseCase,
+				"expected_volume": application.ExpectedVolume,
+				"model_id":        application.ModelID,
+				"source":          application.Source,
+				"is_new":          inserted,
+			})
 		}
 		writeJSON(w, http.StatusOK, response{Status: "ok"})
 	}

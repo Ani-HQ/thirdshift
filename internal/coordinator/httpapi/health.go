@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Ani-HQ/thirdshift/internal/coordinator/auth"
+	"github.com/Ani-HQ/thirdshift/internal/coordinator/cairo"
 	"github.com/Ani-HQ/thirdshift/internal/coordinator/jobs"
 	operatorstore "github.com/Ani-HQ/thirdshift/internal/coordinator/operator"
 	"github.com/Ani-HQ/thirdshift/internal/coordinator/registration"
@@ -44,6 +45,7 @@ type Options struct {
 	StatusCacheTTL         time.Duration
 	RequesterRegionHeader  string
 	WaitlistLimitPerMinute int
+	Cairo                  *cairo.Tracker
 	Now                    func() time.Time
 	Logger                 *slog.Logger
 }
