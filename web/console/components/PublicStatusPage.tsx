@@ -5,6 +5,7 @@ import { publicFetch, publicPost } from "../lib/api";
 import { EarningsTicker } from "./EarningsTicker";
 import { WorldMap } from "./WorldMap";
 import { comparisonDiscountPercent, formatComparisonLine, formatPricePerMillion } from "../lib/pricing";
+import { mergeShowcaseModels } from "../lib/showcaseModels";
 import type { ExpectedVolumeBand, PublicCatalogModel, PublicStatus } from "../lib/types";
 
 type ApplicationState = "idle" | "submitting" | "received" | "error";
@@ -112,7 +113,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
     window.setTimeout(() => setCopied(false), 1600);
   }
 
-  const models = status?.models || [];
+  const models = mergeShowcaseModels(status?.models || []);
   const requesterRegion = formatRegion(status?.requester_region || accessPoint);
 
   return (
@@ -148,7 +149,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
             </button>
           </div>
           <p className="section-note">
-            Open models at community prices. Availability is aggregate — hosts stay private.
+            Growing catalog while host capacity comes online. Apply to reserve access — hosts stay private.
           </p>
           {!status ? <ModelRowsSkeleton /> : null}
           {status && models.length === 0 ? (
