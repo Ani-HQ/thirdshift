@@ -309,6 +309,7 @@ function ModelRow({
 }) {
   const waitlisted = model.availability.state === "waitlist";
   const live = model.availability.state === "available";
+  const highDemand = model.availability.state === "limited";
   const discount = comparisonDiscountPercent(model);
   return (
     <article className={`model-row${active ? " active" : ""}`}>
@@ -363,8 +364,11 @@ function ModelRow({
         {discount ? <span className="cheaper">~{discount}% cheaper</span> : null}
       </div>
       <div className="model-state">
-        <p className="availability">
-          <span className={`dot${live ? " live" : ""}`} aria-hidden="true" />
+        <p className={`availability${highDemand ? " demand" : ""}`}>
+          <span
+            className={`dot${live ? " live" : ""}${highDemand ? " demand" : ""}`}
+            aria-hidden="true"
+          />
           {availabilityLabel(model)}
         </p>
         <p className="speed">{speedLabel(model)}</p>
@@ -381,7 +385,7 @@ function availabilityLabel(model: PublicCatalogModel) {
     case "available":
       return "Available now";
     case "limited":
-      return "Limited right now";
+      return "High demand";
     case "waitlist":
       return "Available on request";
     default:

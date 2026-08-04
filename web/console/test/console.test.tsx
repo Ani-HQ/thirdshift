@@ -203,7 +203,7 @@ describe("console components", () => {
 
     const ranked = withDemoModelAvailability(mergeShowcaseModels(thin.models), 0);
     expect(ranked[0].model_id).toBe("minimax-h3");
-    expect(ranked[0].availability.state).toBe("available");
+    expect(ranked[0].availability.state).toBe("limited");
     expect(ranked.find((model) => model.model_id === "qwen2.5-7b-instruct")?.availability.state).toBe(
       "available"
     );
@@ -219,8 +219,10 @@ describe("console components", () => {
     expect(figures.getByText("7")).toBeInTheDocument();
     expect(container.querySelectorAll(".map-cell.hot").length).toBeGreaterThan(10);
     expect(screen.getAllByText("Available now").length).toBeGreaterThan(3);
-    const minimaxRow = within(modelRowByName(container, "MiniMax H3"));
-    expect(minimaxRow.getByText("Available now")).toBeInTheDocument();
+    const minimaxEl = modelRowByName(container, "MiniMax H3");
+    expect(within(minimaxEl).getByText("High demand")).toBeInTheDocument();
+    expect(minimaxEl.querySelector(".availability.demand")).not.toBeNull();
+    expect(minimaxEl.querySelector(".dot.demand")).not.toBeNull();
   });
 
   it("omits the comparison entirely when a manifest has no market numbers", () => {
