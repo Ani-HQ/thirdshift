@@ -8,6 +8,7 @@ import { jobActionPath, nodeActionPath } from "../lib/api";
 import { comparisonDiscountPercent, formatPricePerMillion } from "../lib/pricing";
 import { formatEarnings } from "../lib/money";
 import { cellForRegion } from "../lib/regions";
+import { SHOWCASE_MODELS, mergeShowcaseModels, setShowcaseModelsEnabled } from "../lib/showcaseModels";
 import type {
   JobSummary,
   NodeSummary,
@@ -20,6 +21,7 @@ import type {
 describe("console components", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    setShowcaseModelsEnabled(false);
   });
 
   it("renders overview metrics from fixture JSON", () => {
@@ -78,21 +80,21 @@ describe("console components", () => {
   it("public status page renders launch figures and live model facts", () => {
     const status = publicStatusFixture({ models: [liveModelFixture()] });
     stubStatusFetch(status);
-    render(<PublicStatusPage initialStatus={status} />);
+    const { container } = render(<PublicStatusPage initialStatus={status} />);
     expect(screen.getByText("Machines online")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument();
-    expect(screen.getByText("Qwen2.5 7B Instruct")).toBeInTheDocument();
-    expect(screen.getByText("$0.03 in / $0.08 out")).toBeInTheDocument();
-    expect(screen.getByText("Available now")).toBeInTheDocument();
-    expect(screen.getByText("24.5 tok/s measured")).toBeInTheDocument();
-    expect(screen.getByText("3 machines serving it")).toBeInTheDocument();
+    const row = within(modelRowByName(container, "Qwen2.5 7B Instruct"));
+    expect(row.getByText("$0.03 in / $0.08 out")).toBeInTheDocument();
+    expect(row.getByText("Available now")).toBeInTheDocument();
+    expect(row.getByText("24.5 tok/s measured")).toBeInTheDocument();
+    expect(row.getByText("3 machines serving it")).toBeInTheDocument();
   });
 
   it("waitlist models read as available on request with no node counts and no live dot", () => {
     const status = publicStatusFixture({ models: [waitlistModelFixture()] });
     stubStatusFetch(status);
     const { container } = render(<PublicStatusPage initialStatus={status} />);
-    const row = within(requireElement(container, ".model-row"));
+    const row = within(modelRowByName(container, "Qwen2.5 7B Instruct"));
     expect(row.getByText("Available on request")).toBeInTheDocument();
     expect(row.getByText("Expected 30 tok/s")).toBeInTheDocument();
     expect(row.getByRole("button", { name: "Apply for access" })).toBeInTheDocument();
@@ -102,7 +104,7 @@ describe("console components", () => {
     expect(row.queryByText(/Available now/)).not.toBeInTheDocument();
     expect(row.queryByText(/tok\/s measured/)).not.toBeInTheDocument();
     expect(container.querySelectorAll(".dot.live")).toHaveLength(0);
-    expect(container.querySelectorAll(".dot")).toHaveLength(1);
+    expect(modelRowByName(container, "Qwen2.5 7B Instruct").querySelectorAll(".dot")).toHaveLength(1);
   });
 
   it("renders license attribution only for models that declare it", () => {
@@ -123,9 +125,7 @@ describe("console components", () => {
     });
     stubStatusFetch(status);
     const { container } = render(<PublicStatusPage initialStatus={status} />);
-    const rows = container.querySelectorAll(".model-row");
-    expect(rows).toHaveLength(2);
-    const llamaRow = within(rows[0] as HTMLElement);
+    const llamaRow = within(modelRowByName(container, "Llama 3.2 3B Instruct"));
     expect(llamaRow.getByText(/Built with Llama/)).toBeInTheDocument();
     const notice = llamaRow.getByText("Llama 3.2 is licensed under the Llama 3.2 Community License");
     expect(notice.closest("a")).toHaveAttribute("href", "https://example.invalid/license");
@@ -133,7 +133,7 @@ describe("console components", () => {
       "href",
       "https://example.invalid/aup"
     );
-    const qwenRow = within(rows[1] as HTMLElement);
+    const qwenRow = within(modelRowByName(container, "Qwen2.5 7B Instruct"));
     expect(qwenRow.queryByText(/Built with Llama/)).not.toBeInTheDocument();
     expect(qwenRow.queryByText(/Acceptable Use Policy/)).not.toBeInTheDocument();
   });
@@ -141,9 +141,28 @@ describe("console components", () => {
   it("renders the market comparison with a rounded cheaper tag", () => {
     const status = publicStatusFixture({ models: [waitlistModelFixture()] });
     stubStatusFetch(status);
+    const { container } = render(<PublicStatusPage initialStatus={status} />);
+    const row = within(modelRowByName(container, "Qwen2.5 7B Instruct"));
+    expect(row.getByText(/Typical hosted: \$0\.04 \/ \$0\.10/)).toBeInTheDocument();
+    expect(row.getByText("~25% cheaper")).toBeInTheDocument();
+  });
+
+  it("fills the public catalog with showcase waitlist models without inventing live capacity", () => {
+    setShowcaseModelsEnabled(true);
+    const live = liveModelFixture({ model_id: "llama-3.1-8b-instruct", display_name: "Llama 3.1 8B Instruct" });
+    const merged = mergeShowcaseModels([live]);
+    expect(merged[0]).toEqual(live);
+    expect(merged.some((model) => model.model_id === "qwen2.5-72b-instruct")).toBe(true);
+    expect(merged.filter((model) => model.model_id === "llama-3.1-8b-instruct")).toHaveLength(1);
+    expect(SHOWCASE_MODELS.every((model) => model.availability.state === "waitlist")).toBe(true);
+    expect(SHOWCASE_MODELS.every((model) => model.availability.available_nodes === 0)).toBe(true);
+
+    const status = publicStatusFixture({ models: [waitlistModelFixture()] });
+    stubStatusFetch(status);
     render(<PublicStatusPage initialStatus={status} />);
-    expect(screen.getByText(/Typical hosted: \$0\.04 \/ \$0\.10/)).toBeInTheDocument();
-    expect(screen.getByText("~25% cheaper")).toBeInTheDocument();
+    expect(screen.getByText("DeepSeek R1 Distill 32B")).toBeInTheDocument();
+    expect(screen.getByText("Llama 3.3 70B Instruct")).toBeInTheDocument();
+    expect(screen.getAllByText("Available on request").length).toBeGreaterThan(5);
   });
 
   it("omits the comparison entirely when a manifest has no market numbers", () => {
@@ -402,6 +421,15 @@ function requireElement(container: HTMLElement, selector: string): HTMLElement {
     throw new Error(`expected ${selector} to be rendered`);
   }
   return found;
+}
+
+function modelRowByName(container: HTMLElement, displayName: string): HTMLElement {
+  const heading = within(container).getByRole("heading", { name: displayName, level: 3 });
+  const row = heading.closest(".model-row");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error(`expected model row for ${displayName}`);
+  }
+  return row;
 }
 
 // The row CTA and the form submit both read "Apply for access", so both are
