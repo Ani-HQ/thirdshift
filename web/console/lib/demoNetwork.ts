@@ -12,20 +12,26 @@ const DEMO_REGIONS: RegionNodeCount[] = [
   { region: "in-south", node_count: 96 },
   { region: "us-east", node_count: 72 },
   { region: "eu-west", node_count: 58 },
+  { region: "ap-southeast", node_count: 49 },
   { region: "af-south", node_count: 41 }
 ];
 
+// Totals are lifetime host credits in microdollars — enough to read as real
+// money on the ticker ($12–$95), not fractions of a cent.
 const DEMO_HOSTS: PublicHost[] = [
-  { handle: "amber-falcon", region: "in-south", state: "serving", jobs_24h: 41, credited_microdollars_24h: 180, credited_microdollars_total: 4210 },
-  { handle: "nile-sparrow", region: "af-south", state: "serving", jobs_24h: 28, credited_microdollars_24h: 120, credited_microdollars_total: 2860 },
-  { handle: "hudson-lynx", region: "us-east", state: "idle", jobs_24h: 19, credited_microdollars_24h: 90, credited_microdollars_total: 5120 },
-  { handle: "rhine-otter", region: "eu-west", state: "serving", jobs_24h: 33, credited_microdollars_24h: 150, credited_microdollars_total: 3680 },
-  { handle: "coorg-moth", region: "in-south", state: "serving", jobs_24h: 52, credited_microdollars_24h: 210, credited_microdollars_total: 6040 },
-  { handle: "lagos-kite", region: "af-south", state: "idle", jobs_24h: 14, credited_microdollars_24h: 60, credited_microdollars_total: 1540 },
-  { handle: "brooklyn-wren", region: "us-east", state: "serving", jobs_24h: 37, credited_microdollars_24h: 160, credited_microdollars_total: 4490 },
-  { handle: "lisbon-fox", region: "eu-west", state: "serving", jobs_24h: 25, credited_microdollars_24h: 110, credited_microdollars_total: 2970 },
-  { handle: "pune-crane", region: "in-south", state: "idle", jobs_24h: 22, credited_microdollars_24h: 95, credited_microdollars_total: 3380 },
-  { handle: "accra-swift", region: "af-south", state: "serving", jobs_24h: 31, credited_microdollars_24h: 140, credited_microdollars_total: 2210 }
+  { handle: "amber-falcon", region: "in-south", state: "serving", jobs_24h: 41, credited_microdollars_24h: 2_400_000, credited_microdollars_total: 48_200_000 },
+  { handle: "nile-sparrow", region: "af-south", state: "serving", jobs_24h: 28, credited_microdollars_24h: 1_600_000, credited_microdollars_total: 27_400_000 },
+  { handle: "hudson-lynx", region: "us-east", state: "idle", jobs_24h: 19, credited_microdollars_24h: 1_100_000, credited_microdollars_total: 61_800_000 },
+  { handle: "rhine-otter", region: "eu-west", state: "serving", jobs_24h: 33, credited_microdollars_24h: 1_900_000, credited_microdollars_total: 39_500_000 },
+  { handle: "coorg-moth", region: "in-south", state: "serving", jobs_24h: 52, credited_microdollars_24h: 3_100_000, credited_microdollars_total: 72_600_000 },
+  { handle: "lagos-kite", region: "af-south", state: "idle", jobs_24h: 14, credited_microdollars_24h: 800_000, credited_microdollars_total: 18_200_000 },
+  { handle: "brooklyn-wren", region: "us-east", state: "serving", jobs_24h: 37, credited_microdollars_24h: 2_200_000, credited_microdollars_total: 54_100_000 },
+  { handle: "lisbon-fox", region: "eu-west", state: "serving", jobs_24h: 25, credited_microdollars_24h: 1_400_000, credited_microdollars_total: 33_700_000 },
+  { handle: "pune-crane", region: "in-south", state: "idle", jobs_24h: 22, credited_microdollars_24h: 1_200_000, credited_microdollars_total: 41_300_000 },
+  { handle: "accra-swift", region: "af-south", state: "serving", jobs_24h: 31, credited_microdollars_24h: 1_700_000, credited_microdollars_total: 24_900_000 },
+  { handle: "orchid-ray", region: "ap-southeast", state: "serving", jobs_24h: 36, credited_microdollars_24h: 2_000_000, credited_microdollars_total: 44_600_000 },
+  { handle: "batik-lark", region: "ap-southeast", state: "idle", jobs_24h: 17, credited_microdollars_24h: 950_000, credited_microdollars_total: 21_800_000 },
+  { handle: "mekong-tern", region: "ap-southeast", state: "serving", jobs_24h: 29, credited_microdollars_24h: 1_550_000, credited_microdollars_total: 36_200_000 }
 ];
 
 /** Popular models float to the top when the demo layer is active. */
@@ -101,14 +107,14 @@ export function withDemoNetworkStats(status: PublicStatus): PublicStatus {
     connected_node_count: Math.max(status.connected_node_count, connected),
     regions_online: regionNodeCounts.map((entry) => entry.region),
     region_node_counts: regionNodeCounts,
-    jobs_completed_24h: Math.max(status.jobs_completed_24h, 18_420),
-    jobs_completed_total: Math.max(status.jobs_completed_total, 214_680),
-    output_tokens_served_24h: Math.max(status.output_tokens_served_24h, 128_400_000),
-    output_tokens_served_total: Math.max(status.output_tokens_served_total, 1_462_000_000),
-    estimated_gpu_hours_reused_24h: Math.max(status.estimated_gpu_hours_reused_24h, 1_840),
-    estimated_gpu_hours_reused: Math.max(status.estimated_gpu_hours_reused, 21_600),
+    jobs_completed_24h: Math.max(status.jobs_completed_24h, 22_180),
+    jobs_completed_total: Math.max(status.jobs_completed_total, 268_400),
+    output_tokens_served_24h: Math.max(status.output_tokens_served_24h, 156_200_000),
+    output_tokens_served_total: Math.max(status.output_tokens_served_total, 1_842_000_000),
+    estimated_gpu_hours_reused_24h: Math.max(status.estimated_gpu_hours_reused_24h, 2_240),
+    estimated_gpu_hours_reused: Math.max(status.estimated_gpu_hours_reused, 26_800),
     hosts: status.hosts.length >= DEMO_HOSTS.length ? status.hosts : DEMO_HOSTS,
-    cities: ["Bengaluru", "Lagos", "Newark", "Amsterdam", "Pune", "Accra"]
+    cities: ["Bengaluru", "Singapore", "Jakarta", "Lagos", "Newark", "Amsterdam", "Pune", "Accra", "Bangkok"]
   };
 }
 

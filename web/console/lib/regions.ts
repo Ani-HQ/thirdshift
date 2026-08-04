@@ -53,3 +53,30 @@ export function cellForRegion(region: string): MapCell | null {
 export function knownRegionCodes(): string[] {
   return Object.keys(REGION_ANCHORS);
 }
+
+const REGION_LABELS: Record<string, string> = {
+  in: "India",
+  "in-south": "India (South)",
+  "in-west": "India (West)",
+  "in-north": "India (North)",
+  "in-east": "India (East)",
+  "eu-west": "Europe (West)",
+  "eu-central": "Europe (Central)",
+  "us-east": "US (East)",
+  "us-west": "US (West)",
+  "ap-southeast": "Southeast Asia",
+  "af-south": "Africa (South)"
+};
+
+/** Short public label for a region code, or a title-cased fallback. */
+export function regionDisplayName(region: string): string {
+  const normalized = region.toLowerCase();
+  if (REGION_LABELS[normalized]) {
+    return REGION_LABELS[normalized];
+  }
+  return region
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}

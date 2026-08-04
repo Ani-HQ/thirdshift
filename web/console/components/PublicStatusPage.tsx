@@ -10,6 +10,7 @@ import {
   withDemoNetworkStats
 } from "../lib/demoNetwork";
 import { comparisonDiscountPercent, formatComparisonLine, formatPricePerMillion } from "../lib/pricing";
+import { regionDisplayName } from "../lib/regions";
 import { mergeShowcaseModels } from "../lib/showcaseModels";
 import type { ExpectedVolumeBand, PublicCatalogModel, PublicStatus } from "../lib/types";
 
@@ -147,7 +148,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
     window.setTimeout(() => setCopied(false), 1600);
   }
 
-  const requesterRegion = formatRegion(displayStatus?.requester_region || accessPoint);
+  const requesterRegion = regionDisplayName(displayStatus?.requester_region || accessPoint || "");
 
   return (
     <main className="public-page">
@@ -189,7 +190,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
           </div>
           <p className="section-note">
             {demoActive
-              ? "Popular open models on a community host network across India, Africa, the US, and Europe. Hosts stay private."
+              ? "Popular open models on a community host network across India, Southeast Asia, Africa, the US, and Europe. Hosts stay private."
               : "Growing catalog while host capacity comes online. Apply to reserve access — hosts stay private."}
           </p>
           {!status ? <ModelRowsSkeleton /> : null}
@@ -432,29 +433,6 @@ function ModelRowsSkeleton() {
 
 function modelName(models: PublicCatalogModel[], modelID: string) {
   return models.find((model) => model.model_id === modelID)?.display_name || modelID;
-}
-
-function formatRegion(region: string | null | undefined) {
-  if (!region) {
-    return "";
-  }
-  const normalized = region.toLowerCase();
-  const known: Record<string, string> = {
-    in: "India",
-    "in-south": "India (South)",
-    "in-west": "India (West)",
-    "eu-west": "Europe (West)",
-    "us-east": "US (East)",
-    "us-west": "US (West)"
-  };
-  if (known[normalized]) {
-    return known[normalized];
-  }
-  return region
-    .split("-")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }
 
 function clientTimezoneRegion() {
