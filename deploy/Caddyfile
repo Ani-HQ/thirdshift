@@ -7,7 +7,15 @@
     reverse_proxy console:3000
   }
 
+  handle /console* {
+    reverse_proxy console:3000
+  }
+
   handle /_next* {
+    reverse_proxy console:3000
+  }
+
+  handle / {
     reverse_proxy console:3000
   }
 
