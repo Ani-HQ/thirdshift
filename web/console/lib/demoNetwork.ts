@@ -69,7 +69,7 @@ type DemoAvail = {
 };
 
 const DEMO_AVAILABILITY: Record<string, DemoAvail> = {
-  "minimax-h3": { state: "available", nodes: 14, tps: 8 },
+  "minimax-h3": { state: "limited", nodes: 14, tps: 8 },
   "llama-3.1-8b-instruct": { state: "available", nodes: 58, tps: 34 },
   "qwen2.5-7b-instruct": { state: "available", nodes: 67, tps: 31 },
   "deepseek-r1-distill-llama-8b": { state: "available", nodes: 42, tps: 29 },

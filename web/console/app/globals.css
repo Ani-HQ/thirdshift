@@ -268,6 +268,7 @@ body:has(.public-page) {
   --pub-line-strong: #d8d8dc;
   --pub-code-bg: #f6f6f6;
   --pub-live: #1a7f37;
+  --pub-demand: #c62828;
   color-scheme: light;
   display: block;
   min-height: 100vh;
@@ -778,6 +779,11 @@ body:has(.public-page) {
   font-size: 14px;
 }
 
+.model-state .availability.demand {
+  color: var(--pub-demand);
+  font-weight: 600;
+}
+
 .model-state .speed {
   color: var(--pub-secondary);
   font-size: 12.5px;
@@ -798,6 +804,10 @@ body:has(.public-page) {
 
 .dot.live {
   background: var(--pub-live);
+}
+
+.dot.demand {
+  background: var(--pub-demand);
 }
 
 .application form {
