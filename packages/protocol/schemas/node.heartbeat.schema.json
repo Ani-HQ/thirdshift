@@ -92,6 +92,7 @@
               "enum": [
                 "nvidia",
                 "amd",
+                "apple",
                 "unknown"
               ]
             },

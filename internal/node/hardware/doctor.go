@@ -72,11 +72,18 @@ func checkPlatform() CheckResult {
 			Message: "Windows x64 host platform detected.",
 		}
 	}
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		return CheckResult{
+			Name:    "platform",
+			Status:  StatusPass,
+			Message: "Apple Silicon host platform detected; llama.cpp will use the Metal backend.",
+		}
+	}
 	return CheckResult{
 		Name:        "platform",
 		Status:      StatusUnsupported,
 		Message:     fmt.Sprintf("%s/%s is not a supported host platform for v0.1.", runtime.GOOS, runtime.GOARCH),
-		Remediation: "Run the host node on Windows 11 x64 with an NVIDIA or AMD GPU. macOS can still run local fake and CPU demo paths.",
+		Remediation: "Run the host node on Windows 11 x64 with an NVIDIA or AMD GPU, or on an Apple Silicon Mac.",
 	}
 }
 
@@ -88,6 +95,12 @@ func checkGPU(ctx context.Context, opts DoctorOptions) ([]GPU, string, []CheckRe
 	if len(gpus) > 0 {
 		return gpus, VendorNvidia, checks
 	}
+	if runtime.GOOS == "darwin" {
+		if appleGPUs, appleChecks, ok := checkApple(ctx, opts); ok {
+			return appleGPUs, VendorApple, appleChecks
+		}
+		return gpus, VendorUnknown, checks
+	}
 	if runtime.GOOS != "windows" {
 		return gpus, VendorUnknown, checks
 	}
@@ -96,6 +109,72 @@ func checkGPU(ctx context.Context, opts DoctorOptions) ([]GPU, string, []CheckRe
 		return gpus, VendorUnknown, checks
 	}
 	return amdGPUs, VendorAMD, amdChecks
+}
+
+// checkApple reports the Apple Silicon GPU and its share of unified memory.
+// There is no discrete VRAM here: the budget is a conservative fraction of the
+// one shared pool, so the number is a working-set allowance rather than a
+// hardware capacity.
+func checkApple(ctx context.Context, opts DoctorOptions) ([]GPU, []CheckResult, bool) {
+	appleGPUs, err := DetectAppleGPUs(ctx, opts.Runner)
+	if err != nil {
+		return nil, nil, false
+	}
+	primary, ok := SelectAppleGPU(appleGPUs)
+	if !ok {
+		return nil, nil, false
+	}
+	name := strings.TrimSpace(firstNonEmptyString(primary.Model, primary.Name))
+
+	totalBytes, memErr := DetectAppleUnifiedMemoryBytes(ctx, opts.Runner)
+	budgetMB := VRAMUnknown
+	if memErr == nil {
+		budgetMB = AppleGPUMemoryBudgetMB(totalBytes)
+	}
+
+	gpuCheck := CheckResult{
+		Name:    "gpu",
+		Status:  StatusPass,
+		Message: fmt.Sprintf("%s detected; llama.cpp will use the Metal backend.", name),
+		Details: map[string]any{
+			"vendor":  VendorApple,
+			"backend": "metal",
+			"cores":   strings.TrimSpace(primary.Cores),
+		},
+	}
+
+	if budgetMB <= 0 {
+		return []GPU{{Name: name, VRAMTotalMB: VRAMUnknown}}, []CheckResult{
+			gpuCheck,
+			{
+				Name:        "vram",
+				Status:      StatusWarn,
+				Message:     "Unified memory could not be read, so the GPU working-set budget is unknown.",
+				Remediation: "Confirm `sysctl -n hw.memsize` works on this host.",
+				Details:     map[string]any{"vendor": VendorApple},
+			},
+		}, true
+	}
+
+	vram := CheckResult{
+		Name:   "vram",
+		Status: StatusPass,
+		Message: fmt.Sprintf("Apple Silicon shares %0.1f GB unified memory; %0.1f GB (%d%%) is budgeted for the GPU.",
+			bytesToGiB(uint64(totalBytes)), float64(budgetMB)/1024, AppleGPUMemoryBudgetPercent),
+		Details: map[string]any{
+			"vendor":            VendorApple,
+			"unified_memory_gb": bytesToGiB(uint64(totalBytes)),
+			"gpu_budget_gb":     float64(budgetMB) / 1024,
+			"budget_percent":    AppleGPUMemoryBudgetPercent,
+			"minimum_gb":        bytesToGiB(MinimumVRAMBytes),
+		},
+	}
+	if uint64(budgetMB)*1024*1024 < MinimumVRAMBytes {
+		vram.Status = StatusFail
+		vram.Remediation = "Use an Apple Silicon Mac with more unified memory; the GPU budget is below the 8 GB floor."
+	}
+
+	return []GPU{{Name: name, VRAMTotalMB: budgetMB}}, []CheckResult{gpuCheck, vram}, true
 }
 
 // checkAMD reports whether an AMD adapter was found, and the checks to use in

@@ -217,3 +217,33 @@ func TestResolveModelExplicitOverride(t *testing.T) {
 		}
 	})
 }
+
+// Apple Silicon feeds a unified-memory budget in as VRAM, so the same tier
+// logic applies. These are the two machines the operator actually has access to.
+func TestSelectModelOnAppleSilicon(t *testing.T) {
+	manifests := catalogForTest(t)
+
+	// 16 GB M4: 65% of unified memory is 10649 MB, which clears the 7B floor
+	// (8192) but not the 14B floor (11264).
+	m4 := HostCapacity{VRAMTotalMB: 10649, RAMTotalMB: 16384, DiskFreeMB: 200000}
+	selection, err := SelectModel(manifests, m4)
+	if err != nil {
+		t.Fatalf("select on a 16GB M4: %v", err)
+	}
+	if selection.ModelID != "qwen2.5-7b-instruct" {
+		t.Fatalf("16GB M4 selected %q, want the 7B (reason: %s)", selection.ModelID, selection.Reason)
+	}
+	if selection.VRAMAssumed {
+		t.Fatal("the unified-memory budget is measured, so nothing is assumed")
+	}
+
+	// 64 GB Mac: 42598 MB budget clears the 32B floor.
+	big := HostCapacity{VRAMTotalMB: 42598, RAMTotalMB: 65536, DiskFreeMB: 500000}
+	selection, err = SelectModel(manifests, big)
+	if err != nil {
+		t.Fatalf("select on a 64GB Mac: %v", err)
+	}
+	if selection.ModelID != "qwen2.5-32b-instruct" {
+		t.Fatalf("64GB Mac selected %q, want the 32B", selection.ModelID)
+	}
+}
