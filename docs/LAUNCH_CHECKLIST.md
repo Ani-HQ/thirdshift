@@ -25,6 +25,7 @@
 - [x] Hash verification failure blocks execution.
 - [x] Scheduler placement is in-process and alpha-scale.
 - [x] Windows 11 x64 NVIDIA host verified on real hardware (2026-07-31, RTX 3060 Ti).
+- [ ] Apple Silicon host verified on real hardware (Metal backend). `thirdshift doctor --json` has been run on an M4 (16 GB) and reports platform pass, vendor apple, and a 10649 MB GPU budget; still unverified end to end: `thirdshift start` auto-selecting and serving a routed request on Metal.
 - [ ] Windows 11 x64 AMD host verified on real hardware (Vulkan backend). Unverified until a Radeon machine runs `thirdshift doctor` and completes a routed request: vendor detection, Vulkan artifact download, and llama-server startup on Vulkan have only been exercised against fixtures.
 - [ ] Five stable cafe nodes enrolled. Pending human pilot.
 - [ ] At least 70% scheduled-hours connected. Pending pilot measurement.

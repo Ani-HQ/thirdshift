@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Raised llama-server startup health timeout to 5 minutes for cold large-model loads while still failing fast when the runtime process exits before readiness.
+- Added Apple Silicon host support: `thirdshift doctor` now passes on `darwin/arm64`, detects the GPU via `system_profiler` and unified memory via `sysctl`, and reports vendor `apple`. macOS uses the existing signed `darwin/arm64` llama.cpp build, which has Metal compiled in, so no new runtime artifact was needed.
+- Apple Silicon reports a GPU working-set budget of 65% of unified memory in place of discrete VRAM, which feeds the VRAM doctor check and auto model selection.
+- Added `apple` to the `gpu_vendor` enum in the `node.heartbeat` schema; without it the coordinator rejected every Apple heartbeat.
+
 - Fixed `thirdshift start` with no `--model` failing on installed binaries: automatic selection listed the catalog directory from disk instead of falling back to the catalog embedded in the binary.
 
 - Fixed nodes going permanently offline about an hour after starting: access tokens were fetched once at startup and never renewed, so any reconnect past the token lifetime was rejected with 401 until the process was restarted by hand. The agent now renews proactively near expiry and retries once on a 401.

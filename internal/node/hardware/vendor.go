@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -12,6 +13,7 @@ import (
 const (
 	VendorNvidia  = "nvidia"
 	VendorAMD     = "amd"
+	VendorApple   = "apple"
 	VendorUnknown = "unknown"
 )
 
@@ -162,6 +164,14 @@ func DetectGPUVendor(ctx context.Context, runner CommandRunner, goos string) str
 	if gpus, err := DetectNvidiaGPUs(ctx, runner); err == nil && len(gpus) > 0 {
 		return VendorNvidia
 	}
+	if goos == "darwin" {
+		if gpus, err := DetectAppleGPUs(ctx, runner); err == nil {
+			if _, ok := SelectAppleGPU(gpus); ok {
+				return VendorApple
+			}
+		}
+		return VendorUnknown
+	}
 	if goos != "windows" {
 		return VendorUnknown
 	}
@@ -171,4 +181,108 @@ func DetectGPUVendor(ctx context.Context, runner CommandRunner, goos string) str
 	}
 	_, vendor := SelectPrimaryController(controllers)
 	return vendor
+}
+
+// Apple Silicon detection. macOS exposes the GPU through system_profiler and
+// unified memory through sysctl; both run behind CommandRunner so this is
+// testable on any OS.
+var (
+	AppleDisplaysArgs = []string{"SPDisplaysDataType", "-json"}
+	AppleMemsizeArgs  = []string{"-n", "hw.memsize"}
+)
+
+// AppleGPU is one entry from SPDisplaysDataType.
+type AppleGPU struct {
+	Name       string `json:"_name"`
+	Model      string `json:"sppci_model"`
+	Cores      string `json:"sppci_cores"`
+	Vendor     string `json:"spdisplays_vendor"`
+	DeviceType string `json:"sppci_device_type"`
+}
+
+type appleDisplaysReport struct {
+	Displays []AppleGPU `json:"SPDisplaysDataType"`
+}
+
+// DetectAppleGPUs reads the macOS display adapter inventory.
+func DetectAppleGPUs(ctx context.Context, runner CommandRunner) ([]AppleGPU, error) {
+	output, err := runner.Run(ctx, "system_profiler", AppleDisplaysArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("query SPDisplaysDataType: %w", err)
+	}
+	return ParseAppleDisplaysJSON(string(output))
+}
+
+func ParseAppleDisplaysJSON(input string) ([]AppleGPU, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return nil, fmt.Errorf("SPDisplaysDataType returned no output")
+	}
+	var report appleDisplaysReport
+	if err := json.Unmarshal([]byte(trimmed), &report); err != nil {
+		return nil, fmt.Errorf("parse SPDisplaysDataType: %w", err)
+	}
+	if len(report.Displays) == 0 {
+		return nil, fmt.Errorf("SPDisplaysDataType returned no GPUs")
+	}
+	return report.Displays, nil
+}
+
+// IsAppleGPU reports whether an entry is an Apple Silicon integrated GPU.
+func IsAppleGPU(gpu AppleGPU) bool {
+	haystack := strings.ToLower(gpu.Vendor + " " + gpu.Model + " " + gpu.Name)
+	return strings.Contains(haystack, "apple")
+}
+
+// SelectAppleGPU returns the Apple Silicon GPU from the inventory, if present.
+func SelectAppleGPU(gpus []AppleGPU) (AppleGPU, bool) {
+	for _, gpu := range gpus {
+		if IsAppleGPU(gpu) {
+			return gpu, true
+		}
+	}
+	return AppleGPU{}, false
+}
+
+// DetectAppleUnifiedMemoryBytes reads total unified memory.
+func DetectAppleUnifiedMemoryBytes(ctx context.Context, runner CommandRunner) (int64, error) {
+	output, err := runner.Run(ctx, "sysctl", AppleMemsizeArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("read hw.memsize: %w", err)
+	}
+	return ParseMemsize(string(output))
+}
+
+func ParseMemsize(input string) (int64, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return 0, fmt.Errorf("hw.memsize returned no output")
+	}
+	parsed, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("hw.memsize %q is not an integer", trimmed)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("hw.memsize %d is not a plausible memory size", parsed)
+	}
+	return parsed, nil
+}
+
+// AppleGPUMemoryBudgetPercent is the share of unified memory treated as usable
+// GPU working set. Apple Silicon has no discrete VRAM: the GPU and the OS share
+// one pool, and Metal's own recommended working set on a 16 GB machine is
+// roughly 70 percent. We sit deliberately below that because a host Mac is
+// somebody's daily-driver laptop, not a headless rig — auto-selection must not
+// choose a model that makes the machine unusable while it serves. Hosts who
+// want to push further can pin a larger model with --model.
+const AppleGPUMemoryBudgetPercent = 65
+
+// AppleGPUMemoryBudgetMB converts total unified memory into the working-set
+// budget that gates model selection.
+func AppleGPUMemoryBudgetMB(totalBytes int64) int64 {
+	if totalBytes <= 0 {
+		return VRAMUnknown
+	}
+	totalMB := totalBytes / 1024 / 1024
+	return totalMB * AppleGPUMemoryBudgetPercent / 100
 }

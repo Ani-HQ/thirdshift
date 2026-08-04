@@ -3,6 +3,7 @@ package hardware
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // HostResources is what the node knows about its own capacity, in megabytes.
@@ -43,6 +44,18 @@ func DetectHostResources(ctx context.Context, runner CommandRunner, diskPath, go
 				resources.GPUName = gpu.Name
 			}
 		}
+	} else if goos == "darwin" {
+		if gpus, err := DetectAppleGPUs(ctx, runner); err == nil {
+			if gpu, ok := SelectAppleGPU(gpus); ok {
+				resources.GPUVendor = VendorApple
+				resources.GPUName = strings.TrimSpace(firstNonEmptyString(gpu.Model, gpu.Name))
+				// Unified memory: there is no discrete VRAM, so the GPU budget
+				// is a conservative share of the one shared pool.
+				if totalBytes, err := DetectAppleUnifiedMemoryBytes(ctx, runner); err == nil {
+					resources.VRAMTotalMB = AppleGPUMemoryBudgetMB(totalBytes)
+				}
+			}
+		}
 	} else if goos == "windows" {
 		if controllers, err := DetectWindowsVideoControllers(ctx, runner); err == nil {
 			primary, vendor := SelectPrimaryController(controllers)
@@ -67,4 +80,13 @@ func DetectHostResources(ctx context.Context, runner CommandRunner, diskPath, go
 	resources.DiskFreeMB = int64(disk / 1024 / 1024)
 
 	return resources, nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

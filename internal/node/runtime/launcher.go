@@ -14,6 +14,13 @@ import (
 	"time"
 )
 
+const (
+	defaultHealthInterval  = 10 * time.Second
+	defaultStartupTimeout  = 5 * time.Minute
+	defaultShutdownTimeout = 5 * time.Second
+	defaultMaxLogBytes     = int64(1 << 20)
+)
+
 type LaunchConfig struct {
 	ExecutablePath  string
 	ModelPath       string
@@ -48,6 +55,8 @@ type RunningRuntime struct {
 	stopOnce sync.Once
 	waitMu   sync.Mutex
 	waitErr  error
+
+	healthClock healthClock
 }
 
 func StartLlamaServer(ctx context.Context, cfg LaunchConfig) (*RunningRuntime, error) {
@@ -61,16 +70,16 @@ func StartLlamaServer(ctx context.Context, cfg LaunchConfig) (*RunningRuntime, e
 		return nil, fmt.Errorf("runtime host %q is rejected; llama-server must bind to 127.0.0.1", cfg.Args.Host)
 	}
 	if cfg.HealthInterval == 0 {
-		cfg.HealthInterval = 10 * time.Second
+		cfg.HealthInterval = defaultHealthInterval
 	}
 	if cfg.StartupTimeout == 0 {
-		cfg.StartupTimeout = 30 * time.Second
+		cfg.StartupTimeout = defaultStartupTimeout
 	}
 	if cfg.ShutdownTimeout == 0 {
-		cfg.ShutdownTimeout = 5 * time.Second
+		cfg.ShutdownTimeout = defaultShutdownTimeout
 	}
 	if cfg.MaxLogBytes == 0 {
-		cfg.MaxLogBytes = 1 << 20
+		cfg.MaxLogBytes = defaultMaxLogBytes
 	}
 	if cfg.WorkDir == "" {
 		cfg.WorkDir = filepath.Dir(cfg.ExecutablePath)
@@ -146,7 +155,7 @@ func (r *RunningRuntime) Stop(ctx context.Context, timeout time.Duration) error 
 		}
 
 		if timeout == 0 {
-			timeout = 5 * time.Second
+			timeout = defaultShutdownTimeout
 		}
 		_ = r.cmd.Process.Signal(os.Interrupt)
 		waitCh := make(chan error, 1)
@@ -175,23 +184,62 @@ func (r *RunningRuntime) Stop(ctx context.Context, timeout time.Duration) error 
 }
 
 func (r *RunningRuntime) waitForHealth(ctx context.Context, timeout, interval time.Duration) error {
-	deadline, cancel := context.WithTimeout(ctx, timeout)
+	clock := r.healthClock
+	if clock == nil {
+		clock = realHealthClock{}
+	}
+	deadline, cancel := clock.WithTimeout(ctx, timeout)
 	defer cancel()
-	ticker := time.NewTicker(interval)
+	ticker := clock.NewTicker(interval)
 	defer ticker.Stop()
 
+	go func() {
+		select {
+		case <-r.done:
+			cancel()
+		case <-deadline.Done():
+		}
+	}()
+
 	for {
+		select {
+		case <-r.done:
+			return r.processExitedBeforeHealthErr()
+		case <-deadline.Done():
+			return r.healthDeadlineErr(deadline)
+		default:
+		}
 		if ok := r.checkHealth(deadline); ok {
 			return nil
 		}
 		select {
 		case <-r.done:
-			return fmt.Errorf("llama-server exited before health check passed: %w", r.getWaitErr())
+			return r.processExitedBeforeHealthErr()
 		case <-deadline.Done():
-			return fmt.Errorf("llama-server health check timed out: %w", deadline.Err())
-		case <-ticker.C:
+			return r.healthDeadlineErr(deadline)
+		case <-ticker.C():
 		}
 	}
+}
+
+func (r *RunningRuntime) processExitedBeforeHealthErr() error {
+	if err := r.getWaitErr(); err != nil {
+		return fmt.Errorf("llama-server process exited before health check passed: %w", err)
+	}
+	return fmt.Errorf("llama-server process exited before health check passed")
+}
+
+func (r *RunningRuntime) healthDeadlineErr(deadline context.Context) error {
+	select {
+	case <-r.done:
+		return r.processExitedBeforeHealthErr()
+	default:
+	}
+	err := deadline.Err()
+	if err == nil {
+		err = context.DeadlineExceeded
+	}
+	return fmt.Errorf("llama-server health check timed out: %w", err)
 }
 
 func (r *RunningRuntime) setWaitErr(err error) {
@@ -217,6 +265,34 @@ func (r *RunningRuntime) checkHealth(ctx context.Context) bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
+}
+
+type healthClock interface {
+	WithTimeout(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	NewTicker(time.Duration) healthTicker
+}
+
+type healthTicker interface {
+	C() <-chan time.Time
+	Stop()
+}
+
+type realHealthClock struct{}
+
+func (realHealthClock) WithTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, timeout)
+}
+
+func (realHealthClock) NewTicker(interval time.Duration) healthTicker {
+	return realHealthTicker{Ticker: time.NewTicker(interval)}
+}
+
+type realHealthTicker struct {
+	*time.Ticker
+}
+
+func (t realHealthTicker) C() <-chan time.Time {
+	return t.Ticker.C
 }
 
 func buildLlamaArgs(cfg LaunchConfig, port int) []string {

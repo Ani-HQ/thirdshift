@@ -144,3 +144,57 @@ func TestShippedManifestCarriesVendorArtifacts(t *testing.T) {
 		t.Fatal("the bare windows/amd64 fallback and the cuda artifact must be the same build")
 	}
 }
+
+// macOS ships exactly one llama.cpp build and Metal is native to it, so there
+// is no darwin backend suffix and none must be invented.
+func TestDarwinResolvesTheBarePlatformArtifact(t *testing.T) {
+	manifest := vendorManifest()
+
+	if keys := ArtifactKeys("darwin/arm64", VendorApple); strings.Join(keys, ",") != "darwin/arm64" {
+		t.Fatalf("apple keys = %#v, want only the bare platform key", keys)
+	}
+	if backend := BackendForVendor(VendorApple); backend != "" {
+		t.Fatalf("apple backend = %q, want empty so no suffix is appended", backend)
+	}
+
+	artifact, key, err := manifest.SelectArtifact("darwin/arm64", VendorApple)
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if key != "darwin/arm64" || artifact.URL != "mac" {
+		t.Fatalf("key = %q url = %q, want the bare darwin artifact", key, artifact.URL)
+	}
+
+	// The AMD-era fallback must not misfire here: even if a darwin host somehow
+	// reported an AMD vendor, there is no darwin/arm64/vulkan artifact and it
+	// has to fall back to the one Mac build rather than failing.
+	artifact, key, err = manifest.SelectArtifact("darwin/arm64", VendorAMD)
+	if err != nil {
+		t.Fatalf("select with amd vendor on darwin: %v", err)
+	}
+	if key != "darwin/arm64" || artifact.URL != "mac" {
+		t.Fatalf("key = %q url = %q, want fallback to the bare darwin artifact", key, artifact.URL)
+	}
+}
+
+// The shipped manifest must carry the Mac build, and must not have grown a
+// bogus metal-suffixed key.
+func TestShippedManifestDarwinArtifact(t *testing.T) {
+	manifest, err := LoadReleaseManifest("../../../models/catalog/llama-cpp-b10182.runtime.json")
+	if err != nil {
+		t.Fatalf("load shipped manifest: %v", err)
+	}
+	if _, ok := manifest.Artifacts["darwin/arm64"]; !ok {
+		t.Fatal("shipped manifest has no darwin/arm64 artifact")
+	}
+	if _, ok := manifest.Artifacts["darwin/arm64/metal"]; ok {
+		t.Fatal("shipped manifest invented a darwin/arm64/metal key; there is only one Mac build")
+	}
+	artifact, key, err := manifest.SelectArtifact("darwin/arm64", VendorApple)
+	if err != nil {
+		t.Fatalf("select from shipped manifest: %v", err)
+	}
+	if key != "darwin/arm64" || artifact.ExecutablePath == "" {
+		t.Fatalf("resolved %q with executable %q", key, artifact.ExecutablePath)
+	}
+}

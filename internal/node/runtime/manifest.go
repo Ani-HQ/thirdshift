@@ -117,6 +117,7 @@ func DecodePublicKey(encoded string) (ed25519.PublicKey, error) {
 const (
 	VendorNvidia  = "nvidia"
 	VendorAMD     = "amd"
+	VendorApple   = "apple"
 	VendorUnknown = "unknown"
 )
 
@@ -139,7 +140,13 @@ func BackendForVendor(vendor string) string {
 	switch strings.ToLower(strings.TrimSpace(vendor)) {
 	case VendorNvidia:
 		return BackendCUDA
+	case VendorApple:
+		// macOS ships one llama.cpp build with Metal compiled in, so the bare
+		// platform key is the Metal build and there is no suffix to select.
+		return ""
 	default:
+		// Unknown and AMD both take Vulkan, which runs on every Windows GPU we
+		// might not have identified.
 		return BackendVulkan
 	}
 }
