@@ -49,7 +49,7 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
   const applicationRef = useRef<HTMLElement | null>(null);
   const accessPoint = useMemo(() => clientTimezoneRegion(), []);
   const demoActive = shouldUseDemoNetwork(status);
-  const displayStatus = status && demoActive ? withDemoNetworkStats(status) : status;
+  const displayStatus = status && demoActive ? withDemoNetworkStats(status, demoPulse) : status;
   const models = useMemo(() => {
     const merged = mergeShowcaseModels(status?.models || []);
     return demoActive ? withDemoModelAvailability(merged, demoPulse) : merged;

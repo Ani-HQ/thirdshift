@@ -198,8 +198,13 @@ describe("console components", () => {
     expect(demo.hosts.length).toBeGreaterThan(5);
     expect(demo.hosts.some((host) => host.region === "sg")).toBe(true);
     expect(demo.hosts.some((host) => host.region === "my")).toBe(true);
+    expect(demo.hosts.filter((host) => host.region === "sg" || host.region === "my").length).toBeGreaterThanOrEqual(
+      6
+    );
     expect(demo.cities.slice(0, 2)).toEqual(["Singapore", "Kuala Lumpur"]);
     expect(demo.hosts[0].credited_microdollars_total).toBeGreaterThanOrEqual(1_000_000);
+    const pulsed = withDemoNetworkStats(thin, 2);
+    expect(pulsed.hosts[0].credited_microdollars_total).toBeGreaterThan(demo.hosts[0].credited_microdollars_total);
 
     const ranked = withDemoModelAvailability(mergeShowcaseModels(thin.models), 0);
     expect(ranked[0].model_id).toBe("minimax-h3");
