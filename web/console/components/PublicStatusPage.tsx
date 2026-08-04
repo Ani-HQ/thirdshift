@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { publicFetch, publicPost } from "../lib/api";
+import { trackEvent } from "../lib/analytics";
 import { EarningsTicker } from "./EarningsTicker";
 import { WorldMap } from "./WorldMap";
 import {
@@ -136,6 +137,10 @@ export function PublicStatusPage({ initialStatus }: { initialStatus?: PublicStat
       // to learn which addresses have already applied.
       setApplicationState("received");
       setApplicationMessage(receivedText);
+      trackEvent("generate_lead", {
+        form_type: "waitlist",
+        model_id: activeModel || "none"
+      });
     } catch (err) {
       setApplicationState("error");
       setApplicationMessage(err instanceof Error ? err.message : "Request could not be sent");
