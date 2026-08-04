@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatEarnings } from "../lib/money";
+import { regionDisplayName } from "../lib/regions";
 import type { PublicHost } from "../lib/types";
 
 const stateLabels: Record<PublicHost["state"], string> = {
@@ -32,7 +33,7 @@ export function EarningsTicker({ hosts }: { hosts: PublicHost[] }) {
         key={`${copy}-${host.handle}`}
       >
         <span className="ticker-handle">{host.handle}</span>
-        {host.region ? <span className="ticker-part">{host.region}</span> : null}
+        {host.region ? <span className="ticker-part">{regionDisplayName(host.region)}</span> : null}
         <span className="ticker-part">{stateLabels[host.state] || host.state}</span>
         <span className="ticker-earned">{formatEarnings(host.credited_microdollars_total)} earned</span>
       </span>
