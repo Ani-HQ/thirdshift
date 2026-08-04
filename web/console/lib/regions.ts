@@ -21,6 +21,8 @@ const REGION_ANCHORS: Record<string, { lat: number; lon: number }> = {
   "ca-central": { lat: 45, lon: -75 },
   "sa-east": { lat: -23, lon: -46 },
   "ap-southeast": { lat: 1, lon: 104 },
+  sg: { lat: 1.3, lon: 103.8 },
+  my: { lat: 3.1, lon: 101.7 },
   "ap-northeast": { lat: 36, lon: 140 },
   "au-east": { lat: -34, lon: 151 },
   "af-south": { lat: -26, lon: 28 },
@@ -65,6 +67,8 @@ const REGION_LABELS: Record<string, string> = {
   "us-east": "US (East)",
   "us-west": "US (West)",
   "ap-southeast": "Southeast Asia",
+  sg: "Singapore",
+  my: "Malaysia",
   "af-south": "Africa (South)"
 };
 

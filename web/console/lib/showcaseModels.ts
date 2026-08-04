@@ -8,6 +8,25 @@ import type { PublicCatalogModel } from "./types";
  */
 export const SHOWCASE_MODELS: PublicCatalogModel[] = [
   showcase({
+    model_id: "minimax-h3",
+    display_name: "MiniMax H3",
+    description:
+      "Open omni video model — text, image, video, and audio in; video with native stereo audio out.",
+    context_tokens: 8192,
+    max_output_tokens: 4096,
+    input: 0.4,
+    output: 1.2,
+    typical_input: 0.6,
+    typical_output: 1.8,
+    expected_tps: 8,
+    attribution: {
+      display_text: "MiniMax H3",
+      notice_text: "MiniMax H3 is licensed under the MiniMax H3 Community License",
+      license_url: "https://huggingface.co/MiniMaxAI/MiniMax-H3",
+      aup_url: "https://huggingface.co/MiniMaxAI/MiniMax-H3"
+    }
+  }),
+  showcase({
     model_id: "llama-3.1-8b-instruct",
     display_name: "Llama 3.1 8B Instruct",
     description: "Meta's everyday open chat model — strong general assistant for light workloads.",

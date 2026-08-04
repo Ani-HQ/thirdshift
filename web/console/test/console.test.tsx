@@ -169,10 +169,11 @@ describe("console components", () => {
     render(<PublicStatusPage initialStatus={status} />);
     expect(screen.getByText("DeepSeek R1 Distill 32B")).toBeInTheDocument();
     expect(screen.getByText("Llama 3.3 70B Instruct")).toBeInTheDocument();
+    expect(screen.getByText("MiniMax H3")).toBeInTheDocument();
     expect(screen.getAllByText("Available on request").length).toBeGreaterThan(5);
   });
 
-  it("demo network boosts metrics, lights five regions, and surfaces popular models as online", () => {
+  it("demo network boosts metrics, lights seven regions, and surfaces popular models as online", () => {
     setShowcaseModelsEnabled(true);
     setDemoNetworkEnabled(true);
     const thin = publicStatusFixture({
@@ -183,15 +184,25 @@ describe("console components", () => {
     });
     expect(shouldUseDemoNetwork(thin)).toBe(true);
     const demo = withDemoNetworkStats(thin);
-    expect(demo.connected_node_count).toBe(316);
-    expect(demo.regions_online).toEqual(["in-south", "us-east", "eu-west", "ap-southeast", "af-south"]);
-    expect(demo.region_node_counts).toHaveLength(5);
+    expect(demo.connected_node_count).toBe(441);
+    expect(demo.regions_online).toEqual([
+      "sg",
+      "my",
+      "in-south",
+      "us-east",
+      "eu-west",
+      "ap-southeast",
+      "af-south"
+    ]);
+    expect(demo.region_node_counts).toHaveLength(7);
     expect(demo.hosts.length).toBeGreaterThan(5);
-    expect(demo.hosts.some((host) => host.region === "ap-southeast")).toBe(true);
+    expect(demo.hosts.some((host) => host.region === "sg")).toBe(true);
+    expect(demo.hosts.some((host) => host.region === "my")).toBe(true);
+    expect(demo.cities.slice(0, 2)).toEqual(["Singapore", "Kuala Lumpur"]);
     expect(demo.hosts[0].credited_microdollars_total).toBeGreaterThanOrEqual(1_000_000);
 
     const ranked = withDemoModelAvailability(mergeShowcaseModels(thin.models), 0);
-    expect(ranked[0].model_id).toBe("llama-3.1-8b-instruct");
+    expect(ranked[0].model_id).toBe("minimax-h3");
     expect(ranked[0].availability.state).toBe("available");
     expect(ranked.find((model) => model.model_id === "qwen2.5-7b-instruct")?.availability.state).toBe(
       "available"
@@ -204,12 +215,12 @@ describe("console components", () => {
     stubStatusFetch(thin);
     const { container } = render(<PublicStatusPage initialStatus={thin} />);
     const figures = within(requireElement(container, ".figures"));
-    expect(figures.getByText("316")).toBeInTheDocument();
-    expect(figures.getByText("5")).toBeInTheDocument();
+    expect(figures.getByText("441")).toBeInTheDocument();
+    expect(figures.getByText("7")).toBeInTheDocument();
     expect(container.querySelectorAll(".map-cell.hot").length).toBeGreaterThan(10);
     expect(screen.getAllByText("Available now").length).toBeGreaterThan(3);
-    const llamaRow = within(modelRowByName(container, "Llama 3.1 8B Instruct"));
-    expect(llamaRow.getByText("Available now")).toBeInTheDocument();
+    const minimaxRow = within(modelRowByName(container, "MiniMax H3"));
+    expect(minimaxRow.getByText("Available now")).toBeInTheDocument();
   });
 
   it("omits the comparison entirely when a manifest has no market numbers", () => {
